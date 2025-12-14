@@ -1,5 +1,11 @@
-<?php /* Template Name: Result Page */ get_header( ); $page_id = get_the_id();
-$search_query = "";
+<?php /* Template Name: Result Page */ get_header(); $page_id = get_the_id();
+
+// Prefer $_GET for templates, and unslash/sanitize in WordPress context.
+$req = $_GET;
+if (function_exists('wp_unslash')) {
+	$req = wp_unslash($req);
+}
+
 $search_query = "Osteosarcoma";
 $country = "";
 $city = "";
@@ -10,6 +16,10 @@ $term = "";
 $age = [];
 $sort = "";
 $trial_id = "";
+$statuslist = '';
+$phaselist = '';
+$typelist = '';
+$agelist = '';
 $min_rnk = 1;
 $max_rnk = 10;
 $page_no = 1;
@@ -19,25 +29,25 @@ $page_no = 1;
     // }
 // } 
  // echo "<pre>"; print_r($_REQUEST); echo "</pre>";
-if(isset($_REQUEST['term']) && $_REQUEST['term'] != ""){
-	$term = $_REQUEST['term'];
-	$search_query = $_REQUEST['term'];
+if(isset($req['term']) && $req['term'] != ""){
+	$term = function_exists('sanitize_text_field') ? sanitize_text_field($req['term']) : (string) $req['term'];
+	$search_query = $term;
 }
-if(isset($_REQUEST['city']) && $_REQUEST['city'] != ""){
-	$city = $_REQUEST['city'];
+if(isset($req['city']) && $req['city'] != ""){
+	$city = function_exists('sanitize_text_field') ? sanitize_text_field($req['city']) : (string) $req['city'];
 	// $search_query .= " AND AREA[LocationCountry]$country";
 	$search_query .= "&city=$city";
 }
-if(isset($_REQUEST['country']) && $_REQUEST['country'] != ""){
-	$country = $_REQUEST['country'];
+if(isset($req['country']) && $req['country'] != ""){
+	$country = function_exists('sanitize_text_field') ? sanitize_text_field($req['country']) : (string) $req['country'];
 	// $search_query .= " AND AREA[LocationCountry]$country";
 	$search_query .= "&country=$country";
 }
-if(isset($_REQUEST['status']) && $_REQUEST['status'] != ""){
-	$status = $_REQUEST['status'];
-	if(!empty($_REQUEST['status'])) {
+if(isset($req['status']) && $req['status'] != ""){
+	$status = is_array($req['status']) ? array_map('sanitize_text_field', $req['status']) : [];
+	if(!empty($status)) {
 		$ci = 1;
-		foreach($_REQUEST['status'] as $singlestatus) {
+		foreach($status as $singlestatus) {
 				if($ci>1) $statuslist .= ",$singlestatus"; else $statuslist = $singlestatus;
 		$ci++; }
 	} 
@@ -45,11 +55,11 @@ if(isset($_REQUEST['status']) && $_REQUEST['status'] != ""){
 	// $search_query .= " AND AREA[OverallStatus]$status AND COVERAGE[FullMatch]$status";
 	// $search_query .= "&status=$status";
 } 
-if(isset($_REQUEST['phase']) && $_REQUEST['phase'] != ""){
-	$phase = $_REQUEST['phase'];
-	if(!empty($_REQUEST['phase'])) {
+if(isset($req['phase']) && $req['phase'] != ""){
+	$phase = is_array($req['phase']) ? array_map('sanitize_text_field', $req['phase']) : [];
+	if(!empty($phase)) {
 		$ci = 1;
-		foreach($_REQUEST['phase'] as $singlephase) {
+		foreach($phase as $singlephase) {
 				if($ci>1) $phaselist .= ",$singlephase"; else $phaselist = $singlephase;
 		$ci++; }
 	} 
@@ -57,11 +67,11 @@ if(isset($_REQUEST['phase']) && $_REQUEST['phase'] != ""){
 	// $search_query .= " AND AREA[Phase]$phase";
 }
 // echo $phaselist;
-if(isset($_REQUEST['type']) && $_REQUEST['type'] != ""){
-	$type = $_REQUEST['type'];
-	if(!empty($_REQUEST['type'])) {
+if(isset($req['type']) && $req['type'] != ""){
+	$type = is_array($req['type']) ? array_map('sanitize_text_field', $req['type']) : [];
+	if(!empty($type)) {
 		$ci = 1;
-		foreach($_REQUEST['type'] as $singletype) {
+		foreach($type as $singletype) {
 				if($ci>1) $typelist .= ",$singletype"; else $typelist = $singletype;
 		$ci++; }
 	} 
@@ -69,11 +79,11 @@ if(isset($_REQUEST['type']) && $_REQUEST['type'] != ""){
 	// $search_query .= " AND AREA[StudyType]$type"; 
 	// $search_query .= "&type=$type";
 }
-if(isset($_REQUEST['age']) && $_REQUEST['age'] != ""){
-	$age = $_REQUEST['age'];
-	if(!empty($_REQUEST['age'])) {
+if(isset($req['age']) && $req['age'] != ""){
+	$age = is_array($req['age']) ? array_map('sanitize_text_field', $req['age']) : [];
+	if(!empty($age)) {
 		$ci = 1;
-		foreach($_REQUEST['age'] as $singleage) {
+		foreach($age as $singleage) {
 				if($ci>1) $agelist .= ",$singleage"; else $agelist = $singleage;
 		$ci++; }
 	} 
@@ -81,18 +91,18 @@ if(isset($_REQUEST['age']) && $_REQUEST['age'] != ""){
 	// $search_query .= " AND AREA[StdAge]$age"; 
 	// $search_query .= "&age=$age";
 }
-if(isset($_REQUEST['sort']) && $_REQUEST['sort'] != ""){
-	$sort = $_REQUEST['sort'];
+if(isset($req['sort']) && $req['sort'] != ""){
+	$sort = function_exists('sanitize_text_field') ? sanitize_text_field($req['sort']) : (string) $req['sort'];
 	// $search_query .= " AND AREA[StdAge]$age"; 
 	$search_query .= "&sort=$sort";
 }
-if(isset($_REQUEST['trial_id']) && $_REQUEST['trial_id'] != ""){
-	$trial_id = $_REQUEST['trial_id'];
+if(isset($req['trial_id']) && $req['trial_id'] != ""){
+	$trial_id = function_exists('sanitize_text_field') ? sanitize_text_field($req['trial_id']) : (string) $req['trial_id'];
 	// $search_query .= " AND AREA[NCTId]$trail_id"; 
 	$search_query .= "&trail_id=$trial_id";
 }
-if(isset($_REQUEST['page_no']) && $_REQUEST['page_no'] != ""){
-	$page_no = $_REQUEST['page_no'];
+if(isset($req['page_no']) && $req['page_no'] != ""){
+	$page_no = max(1, (int) $req['page_no']);
 	$min_rnk = ($page_no - 1)*10;
 	// $max_rnk = $page_no*10;
 	$max_rnk = 10;
@@ -136,6 +146,9 @@ $errr = curl_error($curll);
 
 curl_close($curll); 
 $arrress = json_decode($responsee);
+if (!is_object($arrress)) {
+	$arrress = (object) ['result' => [], 'count' => 0];
+}
 // echo "Record: <pre>"; print_r($arrress); echo "</pre>";
 ?>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">

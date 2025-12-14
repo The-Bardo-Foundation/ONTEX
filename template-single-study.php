@@ -1,10 +1,24 @@
-<?php /* Template Name: Single Study */ get_header( ); $page_id = get_the_id();
-$search_query = "Osteosarcoma";
-if(isset($_REQUEST['id']) && $_REQUEST['id'] != ""){
-	$nctid = $_REQUEST['id'];
-	//$search_query .= " AND AREA[NCTId]$nctid";
+<?php /* Template Name: Single Study */ get_header(); $page_id = get_the_id();
+
+// Prefer $_GET for templates, and unslash/sanitize in WordPress context.
+$req = $_GET;
+if (function_exists('wp_unslash')) {
+	$req = wp_unslash($req);
+}
+
+$search_query = 'Osteosarcoma';
+$nctid = '';
+if (isset($req['id']) && $req['id'] !== '') {
+	$nctid = function_exists('sanitize_text_field') ? sanitize_text_field($req['id']) : (string) $req['id'];
+	// $search_query .= " AND AREA[NCTId]$nctid";
 	$search_query = "AREA[NCTId]$nctid";
-} 
+}
+
+if ($nctid === '') {
+	echo '<div class="container"><p>' . esc_html__('Missing study id.', 'ontex') . '</p></div>';
+	get_footer();
+	return;
+}
 $urll = str_replace(" ","+","http://jayr57.sg-host.com/api/get-trail?trail_id=$nctid");
  // echo $urll;
 $curll = curl_init();
@@ -77,13 +91,19 @@ function get_string_between($string, $start, $end){
 } 
 if($customresult->CustomEligibilityCriteria != "" ) $customresult->EligibilityCriteria = $customresult->CustomEligibilityCriteria;
 	
-$parsedInclusionCriteria =  array_filter(array_unique(explode("\n", get_string_between($customresult->EligibilityCriteria, 'Inclusion Criteria:', 'Exclusion Criteria'))));
-$parsedExclusionCriteria = array_filter(array_unique(explode("\n", explode('Exclusion Criteria:', $customresult->EligibilityCriteria)[1])));
-if(empty($parsedInclusionCriteria)){
-	$parsedInclusionCriteria =  array_filter(array_unique(explode("\n", get_string_between($customresult->EligibilityCriteria, 'INCLUSION CRITERIA', 'EXCLUSION CRITERIA'))));
+$eligibility = isset($customresult->EligibilityCriteria) ? (string) $customresult->EligibilityCriteria : '';
+$parsedInclusionCriteria = array_filter(array_unique(explode("\n", get_string_between($eligibility, 'Inclusion Criteria:', 'Exclusion Criteria'))));
+$parsedExclusionCriteria = [];
+if (strpos($eligibility, 'Exclusion Criteria:') !== false) {
+	$parts = explode('Exclusion Criteria:', $eligibility, 2);
+	$parsedExclusionCriteria = array_filter(array_unique(explode("\n", $parts[1] ?? '')));
 }
-if(empty($parsedExclusionCriteria)){
-	$parsedExclusionCriteria = array_filter(array_unique(explode("\n", explode('EXCLUSION CRITERIA', $customresult->EligibilityCriteria)[1])));
+if(empty($parsedInclusionCriteria)){
+	$parsedInclusionCriteria = array_filter(array_unique(explode("\n", get_string_between($eligibility, 'INCLUSION CRITERIA', 'EXCLUSION CRITERIA'))));
+}
+if(empty($parsedExclusionCriteria) && strpos($eligibility, 'EXCLUSION CRITERIA') !== false){
+	$parts = explode('EXCLUSION CRITERIA', $eligibility, 2);
+	$parsedExclusionCriteria = array_filter(array_unique(explode("\n", $parts[1] ?? '')));
 }
 // $study_field = $study_field2 = $customresult;
 ?>
