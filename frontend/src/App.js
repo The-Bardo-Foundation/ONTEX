@@ -11,8 +11,12 @@ function App() {
     setLoading(true);
     setError(null);
     try {
-      // Use the deployed backend URL
-      const response = await axios.get('https://ontex.onrender.com/api/v1/trials');
+      // Use environment variable for API URL, default to localhost for development
+      // In production (Netlify), set REACT_APP_API_URL to https://ontex.onrender.com
+      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+      console.log("Fetching trials from:", apiUrl);
+      
+      const response = await axios.get(`${apiUrl}/api/v1/trials`);
       
       // The backend returns { count: number, result: [...] }
       if (response.data && response.data.result) {
