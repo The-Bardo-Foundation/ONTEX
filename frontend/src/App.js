@@ -11,11 +11,8 @@ function App() {
     setLoading(true);
     setError(null);
     try {
-      // The proxy in package.json forwards this to http://localhost:8000/api/v1/trials during development
-      // In production, this will hit the relative path on the same domain if served together, 
-      // or you might need to configure the base URL via environment variables if separated.
-      // For this bare-minimum setup, we assume proxy or direct access.
-      const response = await axios.get('/api/v1/trials');
+      // Use the deployed backend URL
+      const response = await axios.get('https://ontex.onrender.com/api/v1/trials');
       
       // The backend returns { count: number, result: [...] }
       if (response.data && response.data.result) {
