@@ -58,6 +58,11 @@ admin.add_view(ClinicalTrialAdmin)
 # Include API Router
 app.include_router(api_router, prefix="/api/v1")
 
+@app.post("/api/v1/debug/run-ingestion")
+async def debug_ingestion():
+    await run_daily_ingestion()
+    return {"status": "started"}
+
 # Mount static files
 # Only mount if the directory exists (it will in Docker, maybe not in local dev unless built)
 static_dir = os.path.join(os.path.dirname(__file__), "static") # Assumes /app/static in docker
