@@ -1,6 +1,6 @@
 import asyncio
 from sqlalchemy import select
-from app.db.database import AsyncSessionLocal
+from app.db.database import SessionLocal
 from app.db.models import ClinicalTrial, TrialStatus
 import random
 
@@ -13,7 +13,7 @@ async def run_daily_ingestion():
     await asyncio.sleep(1)
     
     # Create a dummy record
-    async with AsyncSessionLocal() as session:
+    async with SessionLocal() as session:
         # Check if we already have some dummy data to avoid spamming on every restart/run
         # For demo purposes, we'll just add one.
         
