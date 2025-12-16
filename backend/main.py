@@ -1,51 +1,50 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Dict, Any
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Depends
+from sqladmin import Admin
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-# Create the FastAPI app instance
-app = FastAPI()
+from app.core.config import settings
+from app.db.database import engine, Base, get_db
+from app.db.models import ClinicalTrial, TrialStatus
+from app.admin.views import ClinicalTrialAdmin
+from app.services.ingestion import run_daily_ingestion
 
-# Add CORS middleware to allow cross-origin requests
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins
-    allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods
-    allow_headers=["*"],  # Allows all headers
-)
+# Initialize Scheduler
+scheduler = AsyncIOScheduler()
 
-# Sample data that mimics the required JSON structure
-# This is our "mock" database for now.
-mock_db_data = {
-    "count": 2,
-    "result": [
-        {
-            "NCTId": "NCT01234567",
-            "BriefTitle": "A Study of a New Drug for Osteosarcoma",
-            "CustomBriefSummary": "This is a patient-friendly summary of the first study.",
-            "OverallStatus": "Recruiting",
-            "Phase": "Phase 2",
-            "LocationCountry": "United States",
-            "LocationCity": "Houston"
-        },
-        {
-            "NCTId": "NCT76543210",
-            "BriefTitle": "Another Trial for Bone Cancer",
-            "CustomBriefSummary": "This trial looks at the long-term effects of a treatment.",
-            "OverallStatus": "Completed",
-            "Phase": "Phase 3",
-            "LocationCountry": "Canada, United Kingdom",
-            "LocationCity": "Toronto, London"
-        }
-    ]
-}
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Create tables (simplification for boilerplate)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    
+    # Add ingestion job to run every 24 hours
+    scheduler.add_job(run_daily_ingestion, 'interval', hours=24)
+    scheduler.start()
+    
+    yield
+    
+    # Shutdown
+    scheduler.shutdown()
+
+app = FastAPI(title="Osteosarcoma Clinical Trial Explorer", lifespan=lifespan)
+
+# Setup Admin
+admin = Admin(app, engine)
+admin.add_view(ClinicalTrialAdmin)
 
 @app.get("/api/v1/trials")
-def search_trials() -> Dict[str, Any]:
+async def get_approved_trials(db: AsyncSession = Depends(get_db)):
     """
-    A mock endpoint to search for clinical trials.
-    It ignores all query parameters and returns a hardcoded list of trials.
+    Get all trials with APPROVED status.
     """
-    print("Request received. Returning mock data.")
-    return mock_db_data
+    stmt = select(ClinicalTrial).where(ClinicalTrial.status == TrialStatus.APPROVED)
+    result = await db.execute(stmt)
+    trials = result.scalars().all()
+    return trials
 
+@app.get("/")
+async def root():
+    return {"message": "Clinical Trial Explorer API is running."}
