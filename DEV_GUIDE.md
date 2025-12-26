@@ -1,4 +1,4 @@
-# Development Guide - AI-Augmented Clinical Trial Explorer (ACTE)
+# Development Guide - AI-Augmented Clinical Trial Explorer
 
 Complete guide for setting up, developing, and deploying the Osteosarcoma Now clinical trial system.
 
