@@ -3,6 +3,7 @@ Pytest configuration and fixtures for test suite.
 Handles proper cleanup of resources like database connections and event loops.
 """
 import pytest
+import pytest_asyncio
 import asyncio
 import sys
 from pathlib import Path
@@ -23,7 +24,7 @@ def event_loop():
     loop.close()
 
 
-@pytest.fixture(autouse=True)
+@pytest_asyncio.fixture(autouse=True)
 async def cleanup_engines():
     """
     Fixture that automatically runs after each test to ensure
