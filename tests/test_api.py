@@ -24,7 +24,7 @@ async def test_get_trials_returns_list(tmp_path, monkeypatch):
     monkeypatch.setattr(ingestion, "run_daily_ingestion", noop)
 
     # Import app after env is configured
-    from app.main import app
+    from app.main import app, scheduler
     from app.db.database import engine, Base
 
     # Ensure tables exist for the sqlite test DB
@@ -35,6 +35,10 @@ async def test_get_trials_returns_list(tmp_path, monkeypatch):
         r = await ac.get("/api/v1/trials")
         assert r.status_code == 200
         assert isinstance(r.json(), list)
+    
+    # Shutdown scheduler if it's running
+    if scheduler.running:
+        scheduler.shutdown()
 
 
 @pytest.mark.asyncio
@@ -51,7 +55,7 @@ async def test_debug_ingestion_endpoint(monkeypatch, tmp_path):
 
     monkeypatch.setattr(ingestion, "run_daily_ingestion", fake_run)
 
-    from app.main import app
+    from app.main import app, scheduler
     from app.db.database import engine, Base
 
     async with engine.begin() as conn:
@@ -63,3 +67,7 @@ async def test_debug_ingestion_endpoint(monkeypatch, tmp_path):
         assert r.json().get("status") == "started"
 
     assert called["called"]
+    
+    # Shutdown scheduler if it's running
+    if scheduler.running:
+        scheduler.shutdown()
