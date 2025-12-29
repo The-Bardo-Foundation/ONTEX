@@ -1,4 +1,4 @@
-# Development Guide - AI-Augmented Clinical Trial Explorer
+# Development Guide - AI-Augmented Clinical Trial Explorer (AI-CTE)
 
 Complete guide for setting up, developing, and deploying the Osteosarcoma Now clinical trial system.
 
