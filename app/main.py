@@ -6,32 +6,107 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqladmin import Admin
 from sqlalchemy.ext.asyncio import AsyncSession
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from alembic.config import Config
+from pathlib import Path
+from alembic import command
 import os
+import asyncio
 
 from app.core.config import settings
 from app.db.database import engine, Base, get_db
 from app.db.models import ClinicalTrial, TrialStatus
 from app.admin.views import ClinicalTrialAdmin
-from app.services.ingestion import run_daily_ingestion
 from app.api.endpoints import router as api_router
 
 # Initialize Scheduler
 scheduler = AsyncIOScheduler()
 
+async def run_migrations():
+    """Run Alembic migrations or create tables for local sqlite on startup.
+
+    - If `SKIP_MIGRATIONS=1` is set, do nothing.
+    - If using `sqlite+aiosqlite`, create tables from `Base.metadata` using
+      the async engine so we don't hit greenlet/async driver issues.
+    - Otherwise, run Alembic's `upgrade head` in a thread to avoid blocking
+      the async event loop.
+    """
+    # Ensure we point to the repository's alembic.ini
+    repo_root = Path(__file__).resolve().parents[1]
+    alembic_ini = repo_root / "alembic" / "alembic.ini"
+    alembic_cfg = Config(str(alembic_ini))
+
+    db_url = settings.DATABASE_URL or ""
+
+    if os.getenv("SKIP_MIGRATIONS", "0") == "1":
+        print("run_migrations: SKIP_MIGRATIONS=1 set, skipping automatic alembic upgrade")
+        return
+
+    # If using async sqlite, create metadata tables via async engine
+    if db_url.startswith("sqlite+aiosqlite"):
+        print("run_migrations: detected sqlite+aiosqlite — creating tables if missing")
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            print("run_migrations: sqlite tables ensured via metadata.create_all")
+        except Exception as e:
+            print("run_migrations: error creating sqlite tables:", e)
+            raise
+        return
+
+    # For other DBs, coerce asyncpg marker to sync form for Alembic and run in thread
+    if db_url.startswith("postgresql://"):
+        db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    if "+asyncpg" in db_url:
+        db_url = db_url.replace("+asyncpg", "", 1)
+
+    alembic_cfg.set_main_option("sqlalchemy.url", db_url)
+
+    # Run Alembic in a thread to avoid blocking the event loop
+    def _run_alembic():
+        command.upgrade(alembic_cfg, "head")
+
+    print("run_migrations: running alembic.upgrade in thread")
+    try:
+        await asyncio.to_thread(_run_alembic)
+        print("run_migrations: alembic upgrade completed")
+    except Exception:
+        print("run_migrations: alembic upgrade failed")
+        raise
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Create tables (simplification for boilerplate)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    
-    # Add ingestion job to run every 24 hours
-    scheduler.add_job(run_daily_ingestion, 'interval', hours=24)
-    scheduler.start()
-    
+    # Trace: help diagnose startup hangs
+    print("startup: entering lifespan - running migrations")
+    try:
+        await run_migrations()
+        print("startup: run_migrations() completed")
+    except Exception as e:
+        import traceback
+        print("startup: run_migrations() raised:", e)
+        traceback.print_exc()
+        raise
+
+    print("startup: scheduling ingestion job")
+    try:
+        scheduler.add_job(run_daily_ingestion, 'interval', hours=24)
+        print("startup: added ingestion job")
+        scheduler.start()
+        print("startup: scheduler.start() returned")
+    except Exception as e:
+        import traceback
+        print("startup: scheduler failed to start:", e)
+        traceback.print_exc()
+        raise
+
+    print("startup: lifespan yield - application should be starting now")
     yield
-    
-    # Shutdown
-    scheduler.shutdown()
+
+    print("shutdown: lifespan - shutting down scheduler")
+    try:
+        scheduler.shutdown()
+        print("shutdown: scheduler.shutdown() completed")
+    except Exception as e:
+        print("shutdown: scheduler.shutdown() raised:", e)
 
 app = FastAPI(title="Osteosarcoma Clinical Trial Explorer", lifespan=lifespan)
 
@@ -60,7 +135,9 @@ app.include_router(api_router, prefix="/api/v1")
 
 @app.post("/api/v1/debug/run-ingestion")
 async def debug_ingestion():
-    await run_daily_ingestion()
+    # Import dynamically so tests can monkeypatch `app.services.ingestion.run_daily_ingestion`
+    import app.services.ingestion as ingestion
+    await ingestion.run_daily_ingestion()
     return {"status": "started"}
 
 # Mount static files

@@ -3,6 +3,7 @@ fastapi
 uvicorn
 sqlalchemy
 asyncpg
+alembic
 sqladmin
 apscheduler
 python-multipart
@@ -10,3 +11,7 @@ python-jose[cryptography]
 passlib[bcrypt]
 pydantic-settings
 python-dotenv
+requests
+aiosqlite
+httpx==0.23.3
+pytest-asyncio>=0.23.0
