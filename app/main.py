@@ -17,6 +17,7 @@ from app.db.database import engine, Base, get_db
 from app.db.models import ClinicalTrial, TrialStatus
 from app.admin.views import ClinicalTrialAdmin
 from app.api.endpoints import router as api_router
+from app.services.ingestion import run_daily_ingestion
 
 # Initialize Scheduler
 scheduler = AsyncIOScheduler()
