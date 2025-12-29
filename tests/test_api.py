@@ -1,5 +1,10 @@
 import os
+import sys
+import pathlib
 import pytest
+
+# Ensure repository root is on sys.path so `import app` works in CI
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from httpx import AsyncClient
 
