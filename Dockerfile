@@ -33,7 +33,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy backend code
-COPY app/ ./app/
+    COPY app/ ./app/
+    COPY alembic/ ./alembic/
 
 COPY --from=build-frontend /app/dist /app/app/static
 
