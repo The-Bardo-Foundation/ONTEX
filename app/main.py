@@ -33,8 +33,8 @@ async def run_migrations():
     # Ensure we point to the repository's alembic.ini
     repo_root = Path(__file__).resolve().parents[1]
     alembic_ini = repo_root / "alembic" / "alembic.ini"
-        alembic_cfg = Config(str(alembic_ini))
-        alembic_cfg.set_main_option("script_location", str(repo_root / "alembic"))
+    alembic_cfg = Config(str(alembic_ini))
+    alembic_cfg.set_main_option("script_location", str(repo_root / "alembic"))
 
     db_url = settings.DATABASE_URL or ""
 
