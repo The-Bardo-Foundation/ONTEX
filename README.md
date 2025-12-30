@@ -1,6 +1,7 @@
 <p align="center">
   <img src="https://github.com/user-attachments/assets/fccb203d-3d15-4732-9a6b-45f6de9b8003" height="170" alt="Osteosarcoma Now" style="vertical-align: top;" />
-  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <img width="300" height="138" alt="image" src="https://github.com/user-attachments/assets/31383b6b-bdbf-4349-b6bb-081eb3c5fd58" />
 </p>
 
 # AI-Augmented Clinical Trial Explorer (ACTE)
