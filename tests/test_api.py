@@ -35,7 +35,7 @@ async def test_get_trials_returns_list(tmp_path, monkeypatch):
         r = await ac.get("/api/v1/trials")
         assert r.status_code == 200
         assert isinstance(r.json(), list)
-    
+
     # Shutdown scheduler if it's running
     if scheduler.running:
         scheduler.shutdown()
@@ -48,6 +48,7 @@ async def test_debug_ingestion_endpoint(monkeypatch, tmp_path):
     monkeypatch.setenv("SKIP_MIGRATIONS", "1")
 
     import app.services.ingestion as ingestion
+
     called = {"called": False}
 
     async def fake_run():
@@ -67,7 +68,7 @@ async def test_debug_ingestion_endpoint(monkeypatch, tmp_path):
         assert r.json().get("status") == "started"
 
     assert called["called"]
-    
+
     # Shutdown scheduler if it's running
     if scheduler.running:
         scheduler.shutdown()

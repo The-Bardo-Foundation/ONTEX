@@ -1,4 +1,3 @@
-
 import requests
 
 """
@@ -6,10 +5,11 @@ This script fetches clinical trial data from ClinicalTrials.gov API v2
 and formats it into a readable template.
 """
 
+
 def get_trial_data(nct_id):
     # API v2 endpoint for a single study
     url = f"https://clinicaltrials.gov/api/v2/studies/{nct_id}"
-    
+
     # Selecting the specific fields needed for your template
     params = {
         "fields": (
@@ -28,7 +28,7 @@ def get_trial_data(nct_id):
         response = requests.get(url, params=params)
         response.raise_for_status()
         study = response.json()
-        
+
         # Accessing nested data safely
         protocol = study.get("protocolSection", {})
         ident = protocol.get("identificationModule", {})
@@ -59,17 +59,17 @@ def get_trial_data(nct_id):
             f"\nThe aim of the trial:\n"
             f"{protocol.get('descriptionModule', {}).get('briefSummary')}"
         )
-        
+
         print(f"\nTrial Type: {design.get('studyType')}")
         print(f"Trial Phase: {', '.join(design.get('phases', [])) or 'N/A'}")
         print(f"Trial Status: {status.get('overallStatus')}")
         print(f"Minimum Age: {eligibility.get('minimumAge', 'N/A')}")
         print(f"Maximum Age: {eligibility.get('maximumAge', 'No Limit')}")
-        
-        contact = contacts.get('centralContacts', [{}])[0]
-        contact_name = contact.get('name', 'Contact Sponsor Directly')
+
+        contact = contacts.get("centralContacts", [{}])[0]
+        contact_name = contact.get("name", "Contact Sponsor Directly")
         print(f"\nKey Contact: {contact_name}")
-        
+
         print("\nHow the treatment works (Interventions):")
         for i in interventions:
             print(
@@ -79,11 +79,12 @@ def get_trial_data(nct_id):
 
         print(f"\nWho is the trial for?\n{inclusion}")
         print(f"\nWho is the trial not for?\n{exclusion}")
-        
+
         print(f"\nURL: https://clinicaltrials.gov/study/{nct_id}")
 
     except Exception as e:
         print(f"Error: {e}")
+
 
 if __name__ == "__main__":
     get_trial_data("NCT07262970")

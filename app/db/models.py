@@ -12,6 +12,7 @@ class TrialStatus(str, enum.Enum):
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
 
+
 class ClinicalTrial(Base):
     __tablename__ = "clinical_trials"
 
@@ -21,12 +22,8 @@ class ClinicalTrial(Base):
     official_summary: Mapped[str] = mapped_column(Text)
     custom_summary: Mapped[str] = mapped_column(Text, nullable=True)
     status: Mapped[TrialStatus] = mapped_column(
-        Enum(TrialStatus), 
-        default=TrialStatus.PENDING_REVIEW
+        Enum(TrialStatus), default=TrialStatus.PENDING_REVIEW
     )
     last_updated: Mapped[datetime] = mapped_column(
-        DateTime, 
-        default=datetime.utcnow, 
-        onupdate=datetime.utcnow
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
-

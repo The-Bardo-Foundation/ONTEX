@@ -21,9 +21,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "local"  # local, staging, production
 
     model_config = SettingsConfigDict(
-        env_file=get_env_file(),
-        env_ignore_empty=True,
-        extra="ignore"
+        env_file=get_env_file(), env_ignore_empty=True, extra="ignore"
     )
 
 
@@ -42,4 +40,3 @@ if settings.DATABASE_URL.startswith("http"):
         "'sqlite+aiosqlite:///./ontex.db'",
         file=sys.stderr,
     )
-

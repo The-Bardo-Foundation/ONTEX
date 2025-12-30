@@ -21,6 +21,7 @@ from app.services.ingestion import run_daily_ingestion
 # Initialize Scheduler
 scheduler = AsyncIOScheduler()
 
+
 async def run_migrations():
     """Run Alembic migrations or create tables for local sqlite on startup.
 
@@ -76,6 +77,7 @@ async def run_migrations():
         print("run_migrations: alembic upgrade failed")
         raise
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Trace: help diagnose startup hangs
@@ -85,18 +87,20 @@ async def lifespan(app: FastAPI):
         print("startup: run_migrations() completed")
     except Exception as e:
         import traceback
+
         print("startup: run_migrations() raised:", e)
         traceback.print_exc()
         raise
 
     print("startup: scheduling ingestion job")
     try:
-        scheduler.add_job(run_daily_ingestion, 'interval', hours=24)
+        scheduler.add_job(run_daily_ingestion, "interval", hours=24)
         print("startup: added ingestion job")
         scheduler.start()
         print("startup: scheduler.start() returned")
     except Exception as e:
         import traceback
+
         print("startup: scheduler failed to start:", e)
         traceback.print_exc()
         raise
@@ -111,14 +115,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print("shutdown: scheduler.shutdown() raised:", e)
 
+
 app = FastAPI(title="Osteosarcoma Clinical Trial Explorer", lifespan=lifespan)
 
 # CORS configuration
 origins = [
     "http://localhost:5173",  # Vite dev server
     "http://localhost:3000",
-    "https://my-railway-url.app", # Replace with actual domain if known
-    "*" # Allow all for simplicity in this context, refine for production
+    "https://my-railway-url.app",  # Replace with actual domain if known
+    "*",  # Allow all for simplicity in this context, refine for production
 ]
 
 app.add_middleware(
@@ -136,13 +141,16 @@ admin.add_view(ClinicalTrialAdmin)
 # Include API Router
 app.include_router(api_router, prefix="/api/v1")
 
+
 @app.post("/api/v1/debug/run-ingestion")
 async def debug_ingestion():
     # Import dynamically so tests can monkeypatch
     # `app.services.ingestion.run_daily_ingestion`
     import app.services.ingestion as ingestion
+
     await ingestion.run_daily_ingestion()
     return {"status": "started"}
+
 
 # Mount static files
 # (it will in Docker, maybe not in local dev unless built)
@@ -159,8 +167,9 @@ if os.path.exists(static_dir):
     app.mount(
         "/assets",
         StaticFiles(directory=os.path.join(static_dir, "assets")),
-        name="assets"
+        name="assets",
     )
+
 
 @app.get("/{full_path:path}")
 async def serve_spa(full_path: str):
@@ -168,10 +177,10 @@ async def serve_spa(full_path: str):
     # if included first? No, path matches are tricky)
     # Actually, if we use app.mount for static, specific paths are handled.
     # The Catch-all should be last.
-    
+
     if full_path.startswith("api"):
         return {"error": "API route not found"}
-        
+
     # Serve index.html for SPA
     index_file = os.path.join(static_dir, "index.html")
     if os.path.exists(index_file):
