@@ -31,14 +31,14 @@ def iter_study_index_rows(
     Can be treated as a generator to stream results.
 
     args:
+    Args:
         keyword: search keyword
-        query_mode: one of "cond" (condition), "term" (all terms),
-            "titles" (study titles)
+        query_mode: one of "cond" (condition), "term" (all terms), "titles" (study titles)
         page_size: number of results per API request (max 1000)
         sleep_seconds: delay between requests to avoid rate limiting
         session: optional requests.Session for connection reuse
-
-    yields:
+    
+    Yields:
         Tuple of (nct_id, last_update_posted_date), where
         last_update_posted_date may be empty string if not available.
     """
