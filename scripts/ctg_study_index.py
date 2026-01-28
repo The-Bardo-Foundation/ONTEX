@@ -4,7 +4,6 @@ from typing import Dict, Iterator, Optional, Tuple
 
 import requests
 
-
 API_STUDIES = "https://clinicaltrials.gov/api/v2/studies"
 
 
@@ -22,7 +21,7 @@ def iter_study_index_rows(
     keyword: str,
     query_mode: str = "cond",
     page_size: int = 100,
-    sleep_seconds: float = 0.0, # small delay between requests to avoid rate limiting
+    sleep_seconds: float = 0.0,  # small delay between requests to avoid rate limiting
     session: Optional[requests.Session] = None,
 ) -> Iterator[Tuple[str, str]]:
     """
@@ -33,13 +32,15 @@ def iter_study_index_rows(
 
     args:
         keyword: search keyword
-        query_mode: one of "cond" (condition), "term" (all terms), "titles" (study titles)
+        query_mode: one of "cond" (condition), "term" (all terms),
+            "titles" (study titles)
         page_size: number of results per API request (max 1000)
         sleep_seconds: delay between requests to avoid rate limiting
         session: optional requests.Session for connection reuse
-    
+
     yields:
-        Tuple of (nct_id, last_update_posted_date), where last_update_posted_date may be empty string if not available.
+        Tuple of (nct_id, last_update_posted_date), where
+        last_update_posted_date may be empty string if not available.
     """
     if query_mode not in {"cond", "term", "titles"}:
         raise ValueError("query_mode must be one of: cond, term, titles")
@@ -99,7 +100,10 @@ def export_index_csv(
     page_size: int = 100,
     sleep_seconds: float = 0.0,
 ) -> None:
-    with requests.Session() as s, open(out_csv_path, "w", newline="", encoding="utf-8") as f:
+    with (
+        requests.Session() as s,
+        open(out_csv_path, "w", newline="", encoding="utf-8") as f,
+    ):
         w = csv.writer(f)
         w.writerow(["nct_id", "last_update_posted_date"])
 
