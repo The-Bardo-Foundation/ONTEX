@@ -1,5 +1,5 @@
-name: General issue
-description: A catch-all issue for anything that is not a bug report or feature request.
+name: 📋 General Issue
+description: A catch-all for tasks, refactors, questions, or anything that doesn't fit Bug/Feature templates
 title: "[General]: "
 labels:
   - triage
@@ -7,12 +7,20 @@ body:
   - type: markdown
     attributes:
       value: |
-        Use this for general tasks, refactors, questions that require investigation, or anything that doesn’t fit the Bug/Feature templates.
-
+        ## 📋 General Issue
+        
+        Use this template for:
+        - 🔧 General tasks and maintenance
+        - ♻️ Code refactoring
+        - 🔍 Questions requiring investigation
+        - 📚 Documentation improvements
+        - 🧹 Technical debt
+        - Anything that doesn't fit Bug or Feature templates
   - type: dropdown
     id: area
     attributes:
-      label: Area
+      label: 📍 Area
+      description: Which part of the system does this relate to?
       options:
         - Backend API (FastAPI)
         - Data ingestion pipeline
@@ -27,34 +35,47 @@ body:
   - type: textarea
     id: description
     attributes:
-      label: Description
-      description: What needs doing? Include context and desired outcome.
+      label: 📝 Description
+      description: What needs to be done? Provide context and explain the desired outcome
+      placeholder: |
+        - What is the task or problem?
+        - Why does this need to be done?
+        - What is the desired outcome?
+        - Any relevant context or background?
     validations:
       required: true
 
   - type: textarea
     id: acceptance
     attributes:
-      label: Acceptance criteria
-      description: How do we know this is done?
+      label: ✅ Acceptance Criteria
+      description: How do we know when this is done? List specific, measurable criteria
       placeholder: |
-        - ...
-        - ...
+        - [ ] Criterion 1 is met
+        - [ ] Criterion 2 is complete
+        - [ ] Tests pass
+        - [ ] Documentation is updated
     validations:
       required: false
 
   - type: textarea
     id: notes
     attributes:
-      label: Notes / links
-      description: Link related issues/PRs/docs. Redact secrets.
+      label: 🔗 Notes / Links
+      description: Link related issues, PRs, or documentation (remember to redact any secrets!)
+      placeholder: |
+        - Related to #123
+        - See PR #456
+        - Documentation: [link]
+        - Additional context: ...
     validations:
       required: false
 
   - type: checkboxes
     id: checklist
     attributes:
-      label: Checklist
+      label: ✅ Checklist
+      description: Please confirm the following before submitting
       options:
-        - label: I removed or redacted any secrets (API keys, tokens, PHI/PII).
+        - label: I have removed or redacted any secrets (API keys, tokens, PHI/PII)
           required: true

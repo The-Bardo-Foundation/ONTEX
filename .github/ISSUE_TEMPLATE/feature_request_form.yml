@@ -1,5 +1,5 @@
-name: Feature request
-description: Suggest an improvement or new capability for ACTE.
+name: 💡 Feature Request
+description: Suggest an improvement or new capability for ACTE
 title: "[Feature]: "
 labels:
   - enhancement
@@ -7,12 +7,20 @@ body:
   - type: markdown
     attributes:
       value: |
-        Please describe the user need and the smallest viable solution.
+        ## 💡 Feature Request
+        
+        Thank you for suggesting a new feature! Please provide as much detail as possible to help us understand your needs.
+        
+        **Guidelines:**
+        - Describe the user need and the smallest viable solution
+        - Focus on the problem first, then the solution
+        - Consider alternatives and edge cases
 
   - type: dropdown
     id: area
     attributes:
-      label: Area
+      label: 📍 Area
+      description: Which part of the system does this feature relate to?
       options:
         - Backend API (FastAPI)
         - Data ingestion pipeline
@@ -27,9 +35,14 @@ body:
   - type: textarea
     id: problem
     attributes:
-      label: Problem / motivation
-      description: What problem are you trying to solve? Who benefits?
-      placeholder: "As a ..., I want ..., so that ..."
+      label: 🎯 Problem / Motivation
+      description: What problem are you trying to solve? Who benefits from this feature?
+      placeholder: |
+        Example: "As a clinician, I want to filter trials by phase, so that I can quickly find early-stage opportunities for my patients."
+        
+        - What is the current pain point?
+        - Who will benefit from this feature?
+        - Why is this important?
     validations:
       required: true
 
@@ -44,26 +57,34 @@ body:
   - type: textarea
     id: alternatives
     attributes:
-      label: Alternatives considered
-      description: Any alternative approaches or workarounds?
+      label: 🔄 Alternatives Considered
+      description: Have you considered any alternative approaches or workarounds?
+      placeholder: |
+        - Alternative approach 1: ...
+        - Alternative approach 2: ...
+        - Current workaround (if any): ...
     validations:
       required: false
 
   - type: textarea
     id: scope
     attributes:
-      label: Out of scope
-      description: Explicitly note what this request should NOT include.
-      placeholder: "Not doing X / not changing Y / not adding Z"
+      label: 🚫 Out of Scope
+      description: Explicitly note what this request should NOT include
+      placeholder: |
+        - Not doing X because...
+        - Not changing Y because...
+        - Not adding Z because...
     validations:
       required: false
 
   - type: checkboxes
     id: checklist
     attributes:
-      label: Checklist
+      label: ✅ Checklist
+      description: Please confirm the following before submitting
       options:
-        - label: I searched existing issues to avoid duplicates.
+        - label: I have searched existing issues to avoid duplicates
           required: true
-        - label: This request does not include any sensitive data (PHI/PII).
+        - label: This request does not include any sensitive data (PHI/PII)
           required: true

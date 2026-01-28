@@ -1,5 +1,5 @@
-name: Bug report
-description: Report a reproducible problem in ACTE.
+name: 🐛 Bug Report
+description: Report a reproducible problem in ACTE
 title: "[Bug]: "
 labels:
   - bug
@@ -7,12 +7,19 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to file a bug. Please include enough detail to reproduce.
+        ## 🐛 Bug Report
+        
+        Thank you for taking the time to file a bug report! Please include enough detail so we can reproduce and fix the issue.
+        
+        **Before submitting:**
+        - Search existing issues to see if this has been reported
+        - Ensure you're using the latest version
+        - Include error messages and logs when possible
 
   - type: dropdown
     id: area
     attributes:
-      label: Area
+      label: 📍 Area
       description: Which part of the system is affected?
       options:
         - Backend API (FastAPI)
@@ -28,29 +35,44 @@ body:
   - type: textarea
     id: summary
     attributes:
-      label: Summary
-      description: What happened, and what did you expect to happen?
-      placeholder: "When I..., I expected..., but..."
+      label: 📝 Summary
+      description: Provide a clear and concise description of the bug
+      placeholder: |
+        Example: "When I search for trials by NCT ID, the API returns a 500 error instead of the trial data."
+        
+        - What happened?
+        - What did you expect to happen?
+        - How does this differ from expected behavior?
     validations:
       required: true
 
   - type: textarea
     id: repro
     attributes:
-      label: Steps to reproduce
-      description: Provide clear steps so we can reproduce the issue.
+      label: 🔄 Steps to Reproduce
+      description: Provide clear, numbered steps so we can reproduce the issue
       placeholder: |
-        1. ...
-        2. ...
-        3. ...
+        1. Go to '...'
+        2. Click on '...'
+        3. Scroll down to '...'
+        4. See error
+        
+        Or for API issues:
+        1. Send POST request to /api/endpoint
+        2. With payload: {...}
+        3. Observe response: {...}
     validations:
       required: true
 
   - type: textarea
     id: logs
     attributes:
-      label: Logs / error output
-      description: Paste relevant logs (redact secrets). If you can, include stack traces.
+      label: 📋 Logs / Error Output
+      description: Paste relevant logs, error messages, or stack traces (remember to redact any secrets!)
+      placeholder: |
+        ```
+        Paste your logs here...
+        ```
       render: text
     validations:
       required: false
@@ -58,31 +80,33 @@ body:
   - type: input
     id: version
     attributes:
-      label: Commit / version
-      description: Git commit SHA, tag, or "main".
-      placeholder: "e.g., 1a2b3c4 or main"
+      label: 🏷️ Commit / Version
+      description: Git commit SHA, tag, or branch name
+      placeholder: "e.g., 1a2b3c4, v1.0.0, or main"
     validations:
       required: false
 
   - type: textarea
     id: env
     attributes:
-      label: Environment
-      description: OS, Python version, Node version, Docker version, etc.
+      label: 💻 Environment
+      description: Your environment details (OS, Python version, Node version, Docker version, etc.)
       placeholder: |
-        - OS:
-        - Python:
-        - Node:
-        - Docker:
+        - OS: Ubuntu 22.04 / macOS 13.0 / Windows 11
+        - Python: 3.11.5
+        - Node: 20.10.0
+        - Docker: 24.0.7
+        - Browser (if frontend issue): Chrome 120
     validations:
       required: false
 
   - type: checkboxes
     id: checklist
     attributes:
-      label: Checklist
+      label: ✅ Checklist
+      description: Please confirm the following before submitting
       options:
-        - label: I searched existing issues to avoid duplicates.
+        - label: I have searched existing issues to avoid duplicates
           required: true
-        - label: I removed or redacted any secrets (API keys, tokens, PHI/PII).
+        - label: I have removed or redacted any secrets (API keys, tokens, PHI/PII)
           required: true
