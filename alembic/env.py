@@ -7,6 +7,7 @@ from sqlalchemy import engine_from_config, pool
 from alembic import context
 from app.core.config import settings
 from app.db.database import Base
+import app.db.models  # noqa: F401 - ensure models are loaded for autogenerate
 
 # this is the Alembic Config object
 config = context.config
@@ -15,8 +16,18 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Set SQLAlchemy URL from environment
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+
+def get_sync_database_url(url: str) -> str:
+    """Convert async database URL to sync for Alembic migrations."""
+    if url.startswith("postgresql+asyncpg"):
+        return url.replace("postgresql+asyncpg", "postgresql+psycopg2")
+    if url.startswith("sqlite+aiosqlite"):
+        return url.replace("sqlite+aiosqlite", "sqlite")
+    return url
+
+
+# Set SQLAlchemy URL from environment (converted to sync driver)
+config.set_main_option("sqlalchemy.url", get_sync_database_url(settings.DATABASE_URL))
 
 # Model's MetaData object for 'autogenerate' support
 target_metadata = Base.metadata
