@@ -6,18 +6,17 @@ from app.db.models import ClinicalTrial, TrialStatus
 
 class ClinicalTrialAdmin(ModelView, model=ClinicalTrial):
     column_list = [
-        ClinicalTrial.id,
         ClinicalTrial.nct_id,
-        ClinicalTrial.title,
+        ClinicalTrial.brief_title,
         ClinicalTrial.status,
-        ClinicalTrial.last_updated,
+        ClinicalTrial.last_update_post_date,
     ]
 
     # Read-only fields in the form
     form_widget_args = {
         "nct_id": {"readonly": True},
-        "official_summary": {"readonly": True},
-        "title": {"readonly": True},
+        "brief_title": {"readonly": True},
+        "brief_summary": {"readonly": True},
     }
 
     # Allow editing only specific fields (though read-only widget args above handle UI,
@@ -27,9 +26,10 @@ class ClinicalTrialAdmin(ModelView, model=ClinicalTrial):
     # A safer way to ensure they are present but readonly is form_widget_args.
     # We want admin to edit custom_summary and status.
 
-    form_columns = ["nct_id", "title", "official_summary", "custom_summary", "status"]
+    form_columns = ["nct_id", "brief_title", "brief_summary", "custom_brief_summary", "status"]
 
     # Column formatting for status
+    @staticmethod
     def status_formatter(view, context, model, name):
         status = getattr(model, name)
         color = "gray"
@@ -44,4 +44,4 @@ class ClinicalTrialAdmin(ModelView, model=ClinicalTrial):
             f'<span style="color: {color}; font-weight: bold;">{status.value}</span>'
         )
 
-    column_formatters = {ClinicalTrial.status: status_formatter}
+    column_formatters = {ClinicalTrial.status: status_formatter} # type: ignore
