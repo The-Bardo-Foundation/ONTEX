@@ -1,5 +1,8 @@
 import logging
 
+from .client import AIClient
+from .prompts import CLASSIFICATION_SYSTEM_PROMPT, CLASSIFICATION_USER_PROMPT_TEMPLATE
+from .schemas import ClassificationResult
 
 logger = logging.getLogger(__name__)
 
@@ -8,25 +11,21 @@ CONFIDENCE_THRESHOLD = 0.7
 
 async def classify_trial(
     client: AIClient,
-    trial,
+    trial,  # TODO: type this when input is decided (e.g. ClinicalTrial from db/models.py)
 ) -> ClassificationResult:
-    """Classify a single trial as relevant or irrelevant to osteosarcoma.
 
-    Accepts any object with trial fields (e.g. ClinicalTrial model).
-    Applies the 'include rather than exclude' principle:
-    if confidence < threshold and is_relevant=False, override to relevant.
-    """
-    nct_id = getattr(trial, "nct_id", "unknown")
+    # TODO: get nct_id from trial object
+    nct_id = None
 
     user_prompt = CLASSIFICATION_USER_PROMPT_TEMPLATE.format(
-        nct_id=nct_id,
-        brief_title=getattr(trial, "brief_title", "") or "Not provided",
-        brief_summary=getattr(trial, "brief_summary", "") or "Not provided",
-        eligibility_criteria=getattr(trial, "eligibility_criteria", "") or "Not provided",
-        intervention_description=getattr(trial, "intervention_description", "") or "Not provided",
-        study_type=getattr(trial, "study_type", "") or "Not provided",
-        phase=getattr(trial, "phase", "") or "Not provided",
-        overall_status=getattr(trial, "overall_status", "") or "Not provided",
+        nct_id=nct_id,                      # TODO: from trial
+        brief_title=None,                   # TODO: from trial
+        brief_summary=None,                 # TODO: from trial
+        study_type=None,                    # TODO: from trial
+        phase=None,                         # TODO: from trial
+        overall_status=None,                # TODO: from trial
+        eligibility_criteria=None,          # TODO: from trial
+        intervention_description=None,      # TODO: from trial
     )
 
     result = await client.classify_trial(
