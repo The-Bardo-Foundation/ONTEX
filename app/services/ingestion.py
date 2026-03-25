@@ -209,4 +209,8 @@ async def run_daily_ingestion(
     #   print(f"  Updated trials: {len(updated_trials)}")
     #   print(f"  Rejected hits:  {len(rejected_hits)}")
 
-    pass
+    raise NotImplementedError(
+        "run_daily_ingestion is not yet implemented. Implement the ingestion "
+        "pipeline or disable the scheduled job and related endpoints before "
+        "enabling this in production."
+    )
