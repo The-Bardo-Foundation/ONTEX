@@ -59,11 +59,7 @@ AI SERVICES (to be implemented by another developer)
     Returns False → store in IrrelevantTrial with a reason.
 """
 
-import asyncio
 from typing import List
-
-from app.db.database import SessionLocal
-from app.db.models import ClinicalTrial, IrrelevantTrial, TrialStatus
 
 
 async def run_daily_ingestion(
