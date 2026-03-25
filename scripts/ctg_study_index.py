@@ -18,32 +18,32 @@ def _safe_get(d: Dict, path: Tuple[str, ...], default=None):
 
 
 def iter_study_index_rows(
-    keyword: str,
-    query_mode: str = "cond",
+    search_term: str = "osteosarcoma",
+    query_mode: str = "term",
     page_size: int = 100,
     sleep_seconds: float = 0.0,  # small delay between requests to avoid rate limiting
     session: Optional[requests.Session] = None,
 ) -> Iterator[Tuple[str, str]]:
     """
-    Yields (nct_id, last_update_posted_date) for all studies matching keyword.
+    Yields (nct_id, last_update_posted_date) for all studies matching the search term.
     last_update_posted_date is ISO 8601 date like "2025-01-14" when present.
 
     Can be treated as a generator to stream results.
 
-    args:
     Args:
-        keyword: search keyword
-        query_mode: one of "cond" (condition), "term" (all terms), "titles" (study titles)
+        search_term: text to search for (passed to query.term / query.cond / query.titles).
+            Defaults to "osteosarcoma".
+        query_mode: one of "term" (all terms, default), "cond" (condition), "titles"
         page_size: number of results per API request (max 1000)
         sleep_seconds: delay between requests to avoid rate limiting
         session: optional requests.Session for connection reuse
-    
+
     Yields:
         Tuple of (nct_id, last_update_posted_date), where
         last_update_posted_date may be empty string if not available.
     """
     if query_mode not in {"cond", "term", "titles"}:
-        raise ValueError("query_mode must be one of: cond, term, titles")
+        raise ValueError("query_mode must be one of: term, cond, titles")
 
     s = session or requests.Session()
     page_token: Optional[str] = None
@@ -58,7 +58,7 @@ def iter_study_index_rows(
 
     while True:
         params = {
-            f"query.{query_mode}": keyword,
+            f"query.{query_mode}": search_term,
             "pageSize": page_size,
             "countTotal": "true",
             "fields": fields,
@@ -94,9 +94,9 @@ def iter_study_index_rows(
 
 
 def export_index_csv(
-    keyword: str,
     out_csv_path: str,
-    query_mode: str = "cond",
+    search_term: str = "osteosarcoma",
+    query_mode: str = "term",
     page_size: int = 100,
     sleep_seconds: float = 0.0,
 ) -> None:
@@ -109,7 +109,7 @@ def export_index_csv(
 
         count = 0
         for nct_id, last_update in iter_study_index_rows(
-            keyword=keyword,
+            search_term=search_term,
             query_mode=query_mode,
             page_size=page_size,
             sleep_seconds=sleep_seconds,
@@ -122,4 +122,4 @@ def export_index_csv(
 
 
 if __name__ == "__main__":
-    export_index_csv(keyword="osteosarcoma", out_csv_path="osteosarcoma_index.csv")
+    export_index_csv(out_csv_path="osteosarcoma_index.csv")
