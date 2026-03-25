@@ -13,15 +13,14 @@ router = APIRouter()
 
 class TrialUpdate(BaseModel):
     status: TrialStatus
-    custom_summary: Optional[str] = None
+    custom_brief_summary: Optional[str] = None
 
 
 class TrialResponse(BaseModel):
-    id: int
     nct_id: str
-    title: str
-    official_summary: str
-    custom_summary: Optional[str]
+    brief_title: str
+    brief_summary: Optional[str]
+    custom_brief_summary: Optional[str]
     status: TrialStatus
 
     class Config:
@@ -59,8 +58,8 @@ async def update_trial(
         raise HTTPException(status_code=404, detail="Trial not found")
 
     trial.status = body.status
-    if body.custom_summary is not None:
-        trial.custom_summary = body.custom_summary
+    if body.custom_brief_summary is not None:
+        trial.custom_brief_summary = body.custom_brief_summary
 
     await db.commit()
     await db.refresh(trial)
