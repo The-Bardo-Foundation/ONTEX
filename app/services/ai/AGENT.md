@@ -141,10 +141,11 @@ This agent does NOT fetch data, write to DB, or generate summaries.
 
 ## 5. Error Handling
 
-- LLM returns invalid JSON: retry once, then return
+- All failures (including invalid JSON responses, timeouts, and other API errors)
+  may be retried according to the AI client's configured retry policy (e.g. `max_retries`).
+- After retries are exhausted, return the safe default:
   `is_relevant=true, confidence=0.0, reason="AI evaluation failed — needs manual review"`
-- LLM timeout/API error: retry up to 2 times, then return safe default above
-- **NEVER silently drop a trial.** On any failure, default to RELEVANT.
+- **NEVER silently drop a trial.** On any failure (after applying the retry policy), default to RELEVANT.
 
 ---
 
