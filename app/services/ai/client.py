@@ -53,6 +53,6 @@ class AIClient:
             is_relevant=True,
             confidence=0.0,
             reason="AI evaluation failed -- needs manual review",
-            relevance_tier="primary",
-            matching_criteria=[],
+            relevance_tier="secondary",
+            matching_criteria=["none"],
         )
