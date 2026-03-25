@@ -9,6 +9,24 @@ logger = logging.getLogger(__name__)
 CONFIDENCE_THRESHOLD = 0.7
 
 
+# ---------------------------------------------------------------------------
+# TODO: HOW TO CONNECT THIS TO THE REST OF THE WORKFLOW
+#
+# INPUT — someone upstream needs to call this function and pass a trial:
+#   - TODO: Who calls classify_trial()? (e.g. ingestion pipeline, an API endpoint)
+#   - TODO: What object do they pass in? (e.g. ClinicalTrial from db/models.py, a dict)
+#
+# OUTPUT — the ClassificationResult goes somewhere downstream:
+#   - TODO: What happens with the result? (e.g. store in DB, return via API)
+#   - TODO: Who reads is_relevant to decide next step?
+#
+# EXAMPLE CALL (fill in when wiring up):
+#   client = AIClient()
+#   result = await classify_trial(client, some_trial_object)
+#   # result.is_relevant -> True/False
+# ---------------------------------------------------------------------------
+
+
 async def classify_trial(
     client: AIClient,
     trial,  # TODO: type this when input is decided (e.g. ClinicalTrial from db/models.py)
