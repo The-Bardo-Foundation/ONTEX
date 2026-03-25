@@ -23,11 +23,11 @@ async def run_daily_ingestion():
 
         new_trial = ClinicalTrial(
             nct_id=nct_id,
-            title=f"Study of Osteosarcoma Treatment {nct_id}",
-            official_summary=(
+            brief_title=f"Study of Osteosarcoma Treatment {nct_id}",
+            brief_summary=(
                 "This is the official raw summary from the government database."
             ),
-            custom_summary="AI Generated simplified summary.",
+            custom_brief_summary="AI Generated simplified summary.",
             status=TrialStatus.PENDING_REVIEW,
         )
 
