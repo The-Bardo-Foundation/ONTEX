@@ -58,10 +58,14 @@ async def classify_trial(
             nct_id,
             result.confidence,
         )
-        result.is_relevant = True
-        result.reason = (
-            f"Low confidence ({result.confidence:.0%}) -- included for human review. "
-            f"Original: {result.reason}"
+        result = result.copy(
+            update={
+                "is_relevant": True,
+                "reason": (
+                    f"Low confidence ({result.confidence:.0%}) -- included for human review. "
+                    f"Original: {result.reason}"
+                ),
+            }
         )
 
     return result
