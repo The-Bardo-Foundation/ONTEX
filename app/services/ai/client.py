@@ -12,7 +12,19 @@ logger = logging.getLogger(__name__)
 
 class AIClient:
     def __init__(self, api_key: str | None = None):
-        self._client = AsyncOpenAI(api_key=api_key or settings.OPENAI_API_KEY)
+        resolved_api_key = api_key or settings.OPENAI_API_KEY
+        # Fail fast with a clear error if the API key is not configured properly.
+        if (
+            not resolved_api_key
+            or not str(resolved_api_key).strip()
+            or "your_openai_api_key" in str(resolved_api_key).lower()
+            or "changeme" in str(resolved_api_key).lower()
+        ):
+            raise RuntimeError(
+                "OPENAI_API_KEY is not configured. Set a valid key in "
+                "settings.OPENAI_API_KEY or pass api_key to AIClient."
+            )
+        self._client = AsyncOpenAI(api_key=resolved_api_key)
 
     async def classify_trial(
         self,
