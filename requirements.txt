@@ -1,5 +1,6 @@
 aiofiles
 fastapi
+openai>=1.0.0
 uvicorn
 sqlalchemy
 asyncpg
