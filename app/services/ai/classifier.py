@@ -67,5 +67,17 @@ async def classify_trial(
                 ),
             }
         )
+        # Keep related fields consistent with the override
+        if hasattr(result, "relevance_tier"):
+            # Mark this as a special low-confidence, needs-review classification
+            result.relevance_tier = "needs_review"
+        if hasattr(result, "matching_criteria"):
+            # Optionally annotate matching_criteria to document the override
+            if not result.matching_criteria:
+                result.matching_criteria = "Included due to low-confidence override for human review."
+            else:
+                result.matching_criteria = (
+                    f"{result.matching_criteria} | Included due to low-confidence override for human review."
+                )
 
     return result
