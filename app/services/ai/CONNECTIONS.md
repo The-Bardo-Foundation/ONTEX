@@ -31,7 +31,7 @@ ClassificationResult(
     is_relevant=True,        # bool — relevant to osteosarcoma patients?
     confidence=0.92,         # float 0.0-1.0
     reason="...",            # 1-2 sentence justification
-    relevance_tier="primary" # "primary" | "secondary" | "irrelevant"
+    relevance_tier="primary", # "primary" | "secondary" | "irrelevant"
     matching_criteria=[...]  # which criteria matched
 )
 ```
