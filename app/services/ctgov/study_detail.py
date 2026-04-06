@@ -1,14 +1,28 @@
-import requests
+"""
+Fetches and prints clinical trial data from the ClinicalTrials.gov API v2.
 
+Used as a diagnostic/debug helper during ingestion development.
+For bulk index fetching see study_index.iter_study_index_rows.
 """
-This script fetches clinical trial data from ClinicalTrials.gov API v2
-and formats it into a readable template.
-"""
+
+import requests
 
 
 def get_trial_data(nct_id):
+    """
+    Fetch a single study from ClinicalTrials.gov and print a human-readable summary.
+
+    Requests a subset of fields from the API v2 single-study endpoint and
+    prints the title, status, eligibility criteria, interventions, and contact
+    details to stdout.  Intended for local debugging/inspection.
+
+    Args:
+        nct_id: The NCT identifier string (e.g. "NCT04132895").
+    """
+
     url = f"https://clinicaltrials.gov/api/v2/studies/{nct_id}"
 
+    # Request only the fields we display so the response payload stays small
     params = {
         "fields": (
             "protocolSection.identificationModule.officialTitle,"
@@ -37,6 +51,7 @@ def get_trial_data(nct_id):
             "interventions", []
         )
 
+        # Split the combined eligibility text into inclusion and exclusion sections
         criteria = eligibility.get("eligibilityCriteria", "")
         inclusion = "Not specified"
         exclusion = "Not specified"

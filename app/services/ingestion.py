@@ -78,17 +78,26 @@ async def run_daily_ingestion(
     # ──────────────────────────────────────────────────────────
     # STEP 1 — Collect NCT IDs + last-update dates for each term
     # ──────────────────────────────────────────────────────────
+    # nct_id → last_update_posted_date (ISO 8601 string or "" if unknown)
     all_candidates: dict[str, str] = {}
 
     for term in search_terms:
+        # iter_study_index_rows is a blocking generator; run it in a thread
+        # pool so it does not block the async event loop.
         rows = await asyncio.to_thread(
             lambda t=term: list(iter_study_index_rows(search_term=t))
         )
         for nct_id, last_update in rows:
+            # Later search terms overwrite earlier ones for the same NCT ID;
+            # the date is the same regardless of which term matched.
             all_candidates[nct_id] = last_update
 
     # ──────────────────────────────────────────────────────────
     # STEP 2 — Classify each NCT ID against our database
+    # Three possible outcomes per candidate:
+    #   new_trials     – NCT not in either table → fetch & process
+    #   updated_trials – NCT in ClinicalTrial but date changed → re-fetch
+    #   rejected_hits  – NCT in IrrelevantTrial → policy TBD (step 6)
     # ──────────────────────────────────────────────────────────
     new_trials: list[str] = []
     updated_trials: list[str] = []
@@ -97,26 +106,34 @@ async def run_daily_ingestion(
     candidate_ids = list(all_candidates.keys())
 
     async with SessionLocal() as db:
+        # Fetch last-update dates for every candidate already in ClinicalTrial
         result = await db.execute(
             select(ClinicalTrial.nct_id, ClinicalTrial.last_update_post_date)
             .where(ClinicalTrial.nct_id.in_(candidate_ids))
         )
+        # Map: nct_id → stored last_update_post_date (may be None if not recorded)
         existing_map = {row.nct_id: row.last_update_post_date for row in result}
 
+        # Fetch last-update dates for every candidate already in IrrelevantTrial
         result = await db.execute(
             select(IrrelevantTrial.nct_id, IrrelevantTrial.last_update_post_date)
             .where(IrrelevantTrial.nct_id.in_(candidate_ids))
         )
+        # Map: nct_id → stored last_update_post_date (may be None if not recorded)
         rejected_map = {row.nct_id: row.last_update_post_date for row in result}
 
     for nct_id, api_date in all_candidates.items():
         if nct_id in existing_map:
+            # Coerce None → "" so that a missing DB date does not falsely
+            # trigger an update when the API also returns no date.
             db_date = existing_map[nct_id] or ""
             if db_date != api_date:
                 updated_trials.append(nct_id)
             continue
 
         if nct_id in rejected_map:
+            # Keep the stored date alongside the API date so step 6 can
+            # decide whether to re-evaluate (date changed) or skip.
             rejected_hits.append((nct_id, api_date, rejected_map[nct_id]))
             continue
 
