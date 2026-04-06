@@ -8,9 +8,9 @@ It syncs our database with ClinicalTrials.gov for a list of search terms.
 
 EXISTING CODE USED
 ==================
-- scripts.ctg_study_index.iter_study_index_rows(search_term, ...)
+- app.services.ctgov.study_index.iter_study_index_rows(search_term, ...)
     → yields (nct_id, last_update_posted_date) for every study matching a term.
-- scripts.ctg_study_detail.get_trial_data(nct_id)
+- app.services.ctgov.study_detail.get_trial_data(nct_id)
     → fetches full study JSON from ClinicalTrials.gov API v2.
 
 DATABASE TABLES (see app.db.models)
@@ -59,7 +59,10 @@ AI SERVICES (to be implemented by another developer)
     Returns False → store in IrrelevantTrial with a reason.
 """
 
+import asyncio
 from typing import List
+
+from app.services.ctgov import iter_study_index_rows
 
 
 async def run_daily_ingestion(
@@ -70,17 +73,15 @@ async def run_daily_ingestion(
 
     # ──────────────────────────────────────────────────────────
     # STEP 1 — Collect NCT IDs + last-update dates for each term
-    # Uses: scripts.ctg_study_index.iter_study_index_rows (already implemented)
     # ──────────────────────────────────────────────────────────
-    #
-    #   all_candidates = {}                 # nct_id → last_update_posted_date
-    #
-    #   for term in search_terms:
-    #       for nct_id, last_update in iter_study_index_rows(search_term=term):
-    #           all_candidates[nct_id] = last_update
-    #
-    #   → Result: a dict of every NCT ID that ClinicalTrials.gov returned
-    #     for our search terms, together with the date it was last updated.
+    all_candidates: dict[str, str] = {}
+
+    for term in search_terms:
+        rows = await asyncio.to_thread(
+            lambda t=term: list(iter_study_index_rows(search_term=t))
+        )
+        for nct_id, last_update in rows:
+            all_candidates[nct_id] = last_update
 
     # ──────────────────────────────────────────────────────────
     # STEP 2 — Classify each NCT ID against our database
@@ -113,7 +114,7 @@ async def run_daily_ingestion(
     # ──────────────────────────────────────────────────────────
     # STEP 3 — Fetch full study data for trials that need processing
     # Uses: ClinicalTrials.gov API v2  GET /api/v2/studies/{nct_id}
-    # (see scripts.ctg_study_detail for reference implementation)
+    # (see app.services.ctgov.study_detail for reference implementation)
     # ──────────────────────────────────────────────────────────
     #
     #   trials_to_process = new_trials + updated_trials
@@ -210,3 +211,7 @@ async def run_daily_ingestion(
         "pipeline or disable the scheduled job and related endpoints before "
         "enabling this in production."
     )
+
+
+if __name__ == "__main__":
+    asyncio.run(run_daily_ingestion())
