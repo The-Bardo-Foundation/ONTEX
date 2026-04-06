@@ -111,7 +111,8 @@ async def run_daily_ingestion(
 
     for nct_id, api_date in all_candidates.items():
         if nct_id in existing_map:
-            if existing_map[nct_id] != api_date:
+            db_date = existing_map[nct_id] or ""
+            if db_date != api_date:
                 updated_trials.append(nct_id)
             continue
 
