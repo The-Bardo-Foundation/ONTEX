@@ -7,10 +7,8 @@ and formats it into a readable template.
 
 
 def get_trial_data(nct_id):
-    # API v2 endpoint for a single study
     url = f"https://clinicaltrials.gov/api/v2/studies/{nct_id}"
 
-    # Selecting the specific fields needed for your template
     params = {
         "fields": (
             "protocolSection.identificationModule.officialTitle,"
@@ -29,7 +27,6 @@ def get_trial_data(nct_id):
         response.raise_for_status()
         study = response.json()
 
-        # Accessing nested data safely
         protocol = study.get("protocolSection", {})
         ident = protocol.get("identificationModule", {})
         status = protocol.get("statusModule", {})
@@ -40,7 +37,6 @@ def get_trial_data(nct_id):
             "interventions", []
         )
 
-        # Format Eligibility Criteria (Split Inclusion/Exclusion)
         criteria = eligibility.get("eligibilityCriteria", "")
         inclusion = "Not specified"
         exclusion = "Not specified"
@@ -49,7 +45,6 @@ def get_trial_data(nct_id):
             inclusion = parts[0].replace("Inclusion Criteria:", "").strip()
             exclusion = parts[1].strip()
 
-        # Build the Template Output
         print(f"--- {ident.get('officialTitle')} ---")
         print(
             f"Last Update Posted: "

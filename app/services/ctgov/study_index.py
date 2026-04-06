@@ -7,7 +7,6 @@ import requests
 API_STUDIES = "https://clinicaltrials.gov/api/v2/studies"
 
 
-# Helper to safely access nested dicts
 def _safe_get(d: Dict, path: Tuple[str, ...], default=None):
     cur = d
     for key in path:
@@ -21,7 +20,7 @@ def iter_study_index_rows(
     search_term: str = "osteosarcoma",
     query_mode: str = "term",
     page_size: int = 100,
-    sleep_seconds: float = 0.0,  # small delay between requests to avoid rate limiting
+    sleep_seconds: float = 0.0,
     session: Optional[requests.Session] = None,
 ) -> Iterator[Tuple[str, str]]:
     """
@@ -48,7 +47,6 @@ def iter_study_index_rows(
     s = session or requests.Session()
     page_token: Optional[str] = None
 
-    # Limit payload to the exact fields you need
     fields = ",".join(
         [
             "protocolSection.identificationModule.nctId",
