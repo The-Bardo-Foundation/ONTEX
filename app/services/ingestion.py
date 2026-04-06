@@ -62,6 +62,10 @@ AI SERVICES (to be implemented by another developer)
 import asyncio
 from typing import List
 
+from sqlalchemy import select
+
+from app.db.database import SessionLocal
+from app.db.models import ClinicalTrial, IrrelevantTrial
 from app.services.ctgov import iter_study_index_rows
 
 
@@ -85,31 +89,37 @@ async def run_daily_ingestion(
 
     # ──────────────────────────────────────────────────────────
     # STEP 2 — Classify each NCT ID against our database
-    # Three groups:
     # ──────────────────────────────────────────────────────────
-    #
-    #   new_trials     = []    # NCT not in either table         → must fetch & process
-    #   updated_trials = []    # NCT in ClinicalTrial but date changed → must re-fetch
-    #   rejected_hits  = []    # NCT in IrrelevantTrial          → check date (TBD policy)
-    #
-    #   for nct_id, api_date in all_candidates.items():
-    #
-    #       existing = db.query(ClinicalTrial).get(nct_id)
-    #       if existing:
-    #           if existing.last_update_post_date != api_date:
-    #               updated_trials.append(nct_id)
-    #           # else: unchanged → skip, nothing to do
-    #           continue
-    #
-    #       rejected = db.query(IrrelevantTrial).get(nct_id)
-    #       if rejected:
-    #           rejected_hits.append((nct_id, api_date, rejected.last_update_post_date))
-    #           # TBD: policy for whether to re-evaluate rejected trials
-    #           #   - if date changed → maybe re-fetch and re-classify
-    #           #   - if date unchanged → skip
-    #           continue
-    #
-    #       new_trials.append(nct_id)
+    new_trials: list[str] = []
+    updated_trials: list[str] = []
+    rejected_hits: list[tuple[str, str, str | None]] = []
+
+    candidate_ids = list(all_candidates.keys())
+
+    async with SessionLocal() as db:
+        result = await db.execute(
+            select(ClinicalTrial.nct_id, ClinicalTrial.last_update_post_date)
+            .where(ClinicalTrial.nct_id.in_(candidate_ids))
+        )
+        existing_map = {row.nct_id: row.last_update_post_date for row in result}
+
+        result = await db.execute(
+            select(IrrelevantTrial.nct_id, IrrelevantTrial.last_update_post_date)
+            .where(IrrelevantTrial.nct_id.in_(candidate_ids))
+        )
+        rejected_map = {row.nct_id: row.last_update_post_date for row in result}
+
+    for nct_id, api_date in all_candidates.items():
+        if nct_id in existing_map:
+            if existing_map[nct_id] != api_date:
+                updated_trials.append(nct_id)
+            continue
+
+        if nct_id in rejected_map:
+            rejected_hits.append((nct_id, api_date, rejected_map[nct_id]))
+            continue
+
+        new_trials.append(nct_id)
 
     # ──────────────────────────────────────────────────────────
     # STEP 3 — Fetch full study data for trials that need processing
