@@ -102,7 +102,7 @@ def map_api_to_model(raw_json: dict) -> dict:
     return {
         # Official fields
         "nct_id": _get(ident, "nctId"),
-        "brief_title": _get(ident, "briefTitle"),
+        "brief_title": _get(ident, "briefTitle") or "Title not available",
         "brief_summary": _get(description, "briefSummary"),
         "overall_status": _get(status_mod, "overallStatus"),
         "phase": phase,

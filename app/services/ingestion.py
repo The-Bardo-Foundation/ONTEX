@@ -121,6 +121,10 @@ async def run_daily_ingestion(
         if api_date != (stored_date or "")
     ]
 
+    # Precompute a set of nct_ids that came from rejected_hits for O(1) lookups
+    # in the per-trial loop (avoids an O(n²) list rebuild per trial).
+    rejected_nct_ids = {nct_id for nct_id, _, _ in rejected_hits}
+
     # ──────────────────────────────────────────────────────────
     # STEP 3 — Fetch full study data for all trials that need processing
     # ──────────────────────────────────────────────────────────
@@ -132,7 +136,11 @@ async def run_daily_ingestion(
         if raw is None:
             logger.warning("Skipping %s — fetch_full_study returned None", nct_id)
             continue
-        fetched.append(map_api_to_model(raw))
+        mapped = map_api_to_model(raw)
+        if not mapped.get("nct_id"):
+            logger.warning("Skipping trial — map_api_to_model returned no nct_id for %s", nct_id)
+            continue
+        fetched.append(mapped)
 
     if not fetched:
         logger.info(
@@ -144,6 +152,43 @@ async def run_daily_ingestion(
         return
 
     # ──────────────────────────────────────────────────────────
+    # STEP 3.5 — Protect admin-edited custom_* fields on re-ingestion
+    # For trials that already exist in the DB (updated or re-evaluated),
+    # load their current non-null custom_* values so the AI summarisation
+    # step does not overwrite content that an admin has manually edited.
+    # ──────────────────────────────────────────────────────────
+    _CUSTOM_FIELDS = [
+        "custom_brief_title", "custom_brief_summary", "custom_overall_status",
+        "custom_phase", "custom_study_type", "custom_location_country",
+        "custom_location_city", "custom_minimum_age", "custom_maximum_age",
+        "custom_central_contact_name", "custom_central_contact_phone",
+        "custom_central_contact_email", "custom_eligibility_criteria",
+        "custom_intervention_description", "custom_last_update_post_date",
+        "key_information",
+    ]
+
+    # Only trials that were previously in the DB may have admin-edited fields.
+    trials_with_existing_edits = set(updated_trials) | set(reeval_list)
+    existing_custom_map: dict[str, dict] = {}  # nct_id → {field: non-null value}
+
+    if trials_with_existing_edits:
+        fetched_existing_ids = {
+            td["nct_id"] for td in fetched if td.get("nct_id") in trials_with_existing_edits
+        }
+        if fetched_existing_ids:
+            async with SessionLocal() as db:
+                for model_cls in (ClinicalTrial, IrrelevantTrial):
+                    result = await db.execute(
+                        select(model_cls).where(model_cls.nct_id.in_(fetched_existing_ids))
+                    )
+                    for row in result.scalars():
+                        existing_custom_map[row.nct_id] = {
+                            field: getattr(row, field)
+                            for field in _CUSTOM_FIELDS
+                            if getattr(row, field) is not None
+                        }
+
+    # ──────────────────────────────────────────────────────────
     # STEP 4 — AI summarisation: populate custom_* fields
     # AIClient is instantiated once per run (one connection pool).
     # If OPENAI_API_KEY is not set, AIClient raises RuntimeError here —
@@ -153,7 +198,12 @@ async def run_daily_ingestion(
 
     for trial_data in fetched:
         custom_fields = await ai_generate_summaries(ai_client, trial_data)
-        trial_data.update(custom_fields)
+        # Apply AI-generated fields, but preserve any non-null admin-edited values.
+        # For protected fields, restore the existing DB value into trial_data so
+        # that db.merge() does not overwrite it with None.
+        protected = existing_custom_map.get(trial_data.get("nct_id"), {})
+        for field, value in custom_fields.items():
+            trial_data[field] = protected.get(field, value)
 
     # ──────────────────────────────────────────────────────────
     # STEP 5 — Relevance classification + database upsert
@@ -191,7 +241,7 @@ async def run_daily_ingestion(
                 await db.merge(trial)
 
                 # If this trial was previously in irrelevant_trials, remove it
-                if nct_id in [nct for nct, _, _ in rejected_hits]:
+                if nct_id in rejected_nct_ids:
                     existing_irrelevant = await db.get(IrrelevantTrial, nct_id)
                     if existing_irrelevant:
                         await db.delete(existing_irrelevant)
