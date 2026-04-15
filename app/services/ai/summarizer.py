@@ -58,7 +58,11 @@ async def ai_generate_summaries(client: AIClient, trial_data: dict) -> dict:
     )
 
     if result is None:
-        logger.warning("Summarisation failed for %s — custom_brief_summary set to None", nct_id)
+        logger.warning(
+            "Summarisation failed for %s — custom_brief_summary set to None "
+            "(see preceding generate_summaries error log for details)",
+            nct_id,
+        )
         return _NULL_RESULT.copy()
 
     return {field: result.get(field) for field in _GENERATED_FIELDS}

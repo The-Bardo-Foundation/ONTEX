@@ -87,6 +87,13 @@ class ClinicalTrial(ClinicalTrialBase, Base):
     ai_relevance_tier: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     ai_matching_criteria: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # Approval tracking — set by PATCH /approve endpoint, preserved across re-ingestions
+    approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    approved_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # Previous approval — captured when an APPROVED trial is reset to PENDING_REVIEW
+    previous_approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    previous_approved_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
 
 class IrrelevantTrial(ClinicalTrialBase, Base):
     """Trials fetched but deemed irrelevant (stored for deduplication and auditing)."""
@@ -97,4 +104,20 @@ class IrrelevantTrial(ClinicalTrialBase, Base):
     irrelevance_reason: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
 
+class IngestionRun(Base):
+    """One record per ingestion pipeline execution — queryable audit trail."""
+
+    __tablename__ = "ingestion_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_at: Mapped[datetime] = mapped_column(DateTime)
+    search_terms: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON-encoded list
+    candidates_found: Mapped[int] = mapped_column(Integer, default=0)
+    new_trials: Mapped[int] = mapped_column(Integer, default=0)
+    updated_trials: Mapped[int] = mapped_column(Integer, default=0)
+    reeval_trials: Mapped[int] = mapped_column(Integer, default=0)
+    relevant_processed: Mapped[int] = mapped_column(Integer, default=0)
+    irrelevant_processed: Mapped[int] = mapped_column(Integer, default=0)
+    fetch_errors: Mapped[int] = mapped_column(Integer, default=0)
+    classify_errors: Mapped[int] = mapped_column(Integer, default=0)
 

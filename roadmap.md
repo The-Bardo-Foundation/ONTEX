@@ -23,6 +23,9 @@ The project has solid infrastructure in place, but the core ingestion pipeline i
 - `config.py` extended with `SEARCH_TERMS`, `INGESTION_SCHEDULE_HOURS`, `AI_MODEL`, `CONFIDENCE_THRESHOLD`, `PAGE_SIZE`
 - `openai` added to `requirements.txt`
 - Migration `002_add_ai_classification_columns` — adds `ai_relevance_confidence`, `ai_relevance_reason`, `ai_relevance_tier`, `ai_matching_criteria` to `clinical_trials`
+- Migration `003_add_tracking_columns` — adds `approved_at`, `approved_by`, `previous_approved_at`, `previous_approved_by` to `clinical_trials`; adds `ingestion_runs` table
+- `ingestion_runs` table: one row per pipeline execution with counts (new/updated/reeval/errors) — queryable audit trail
+- `OPENAI_API_KEY` sentinel fix: `"Not Set"` default now correctly triggers RuntimeError in `AIClient`
 - FastAPI backend with `GET /api/v1/trials` and `PATCH /api/v1/trials/{nct_id}`
 - SQLAdmin panel for manual trial management
 - React frontend with sidebar, trial detail view, and approve/reject buttons
@@ -31,17 +34,18 @@ The project has solid infrastructure in place, but the core ingestion pipeline i
 
 ### Not done (blocking)
 - Authentication and user management
-- Full trial detail API endpoint
+- Full trial detail API endpoint (`GET /api/v1/trials/{nct_id}`)
+- PHP template endpoint (`GET /api/v1/trail?trail_id={nct_id}`) — Phase 1.7
 - Admin review queue (new/updated trials)
 - Reviewer notes and audit log
 - Search and filtering in both API and frontend
-- Tests beyond two basic happy-path API tests (ingestion pipeline tests are Phase 2)
+- `test_get_trials_returns_list` in `test_api.py` is broken: module-level imports in `test_ingestion.py` cause the SQLAlchemy engine to be cached before the test's monkeypatch can redirect it — fix as part of Phase 2 test infrastructure
 
 ---
 
 ## Phases
 
-### Phase 1 — Complete the ingestion pipeline ✅ (1.1–1.4 done)
+### Phase 1 — Complete the ingestion pipeline ✅ (1.1–1.6 done)
 
 This is the critical path. Nothing else matters until data flows end-to-end.
 
@@ -82,18 +86,19 @@ Create a new function `ai_generate_summaries(client, trial_data: dict) -> dict` 
   - `is_relevant=False`: upsert into `irrelevant_trials` with `irrelevance_reason` set to the LLM's reason string
 - Store the `classification_result` object fields (`confidence`, `reason`, `relevance_tier`, `matching_criteria`) somewhere reviewable — add columns to `clinical_trials` for `ai_relevance_confidence`, `ai_relevance_reason`, `ai_relevance_tier`, `ai_matching_criteria`
 
-#### 1.5 Implement `ingestion.py` Step 6 — detect new vs. updated trials
+#### 1.5 Implement `ingestion.py` Step 6 — detect new vs. updated trials ✅
 
 - **New trial**: NCT ID not in either table → run Steps 3–5, insert as `PENDING_REVIEW`
 - **Updated trial**: NCT ID already in `clinical_trials` with `status=APPROVED`, and `last_update_post_date` has changed → re-run Steps 3–5, set `status=PENDING_REVIEW`, store the previous `approved_at` timestamp and `approved_by` so reviewers can compare
 - **Previously rejected**: NCT ID in `irrelevant_trials` → re-evaluate only if `last_update_post_date` has changed; otherwise skip
 - **No change**: NCT ID already in `clinical_trials` with same `last_update_post_date` → skip
+- `approved_at`, `approved_by`, `previous_approved_at`, `previous_approved_by` columns added to `clinical_trials` (migration 003)
 
-#### 1.6 Implement `ingestion.py` Step 7 — logging and error handling
+#### 1.6 Implement `ingestion.py` Step 7 — logging and error handling ✅
 
-- Log each run: number of new trials found, number updated, number classified as irrelevant, number of AI errors
-- Write a run summary to a `ingestion_runs` table (or just structured logging): `run_at`, `trials_fetched`, `trials_inserted`, `trials_updated`, `trials_skipped`, `errors`
-- Catch and log individual trial errors so one bad trial does not abort the whole run
+- Log each run: number of new trials found, number updated, number classified as irrelevant, fetch errors, classify errors
+- `ingestion_runs` table added (migration 003): one row per run with all counts — queryable audit trail
+- Per-trial error handling: one bad trial does not abort the run; `fetch_errors` and `classify_errors` are tracked and written to `ingestion_runs`
 
 #### 1.7 Fix the PHP template API endpoint
 

@@ -31,13 +31,14 @@ PENDING_REVIEW so reviewers can check what changed before it goes live again.
 import asyncio
 import json
 import logging
+from datetime import datetime
 from typing import List
 
 from sqlalchemy import select
 
 from app.core.config import settings
 from app.db.database import SessionLocal
-from app.db.models import ClinicalTrial, IrrelevantTrial, TrialStatus
+from app.db.models import ClinicalTrial, IngestionRun, IrrelevantTrial, TrialStatus
 from app.services.ai.classifier import classify_trial
 from app.services.ai.client import AIClient
 from app.services.ai.summarizer import ai_generate_summaries
@@ -130,24 +131,38 @@ async def run_daily_ingestion(
     # ──────────────────────────────────────────────────────────
     trials_to_process = new_trials + updated_trials + reeval_list
     fetched: list[dict] = []
+    fetch_errors = 0
 
     for nct_id in trials_to_process:
         raw = await asyncio.to_thread(fetch_full_study, nct_id)
         if raw is None:
             logger.warning("Skipping %s — fetch_full_study returned None", nct_id)
+            fetch_errors += 1
             continue
         mapped = map_api_to_model(raw)
         if not mapped.get("nct_id"):
             logger.warning("Skipping trial — map_api_to_model returned no nct_id for %s", nct_id)
+            fetch_errors += 1
             continue
         fetched.append(mapped)
 
     if not fetched:
+        async with SessionLocal() as db:
+            db.add(IngestionRun(
+                run_at=datetime.utcnow(),
+                search_terms=json.dumps(search_terms),
+                candidates_found=len(all_candidates),
+                new_trials=len(new_trials),
+                updated_trials=len(updated_trials),
+                reeval_trials=len(reeval_list),
+                fetch_errors=fetch_errors,
+            ))
+            await db.commit()
         logger.info(
             "Ingestion complete: no trials to process "
-            "(search_terms=%s, candidates=%d, new=%d, updated=%d, reeval=%d)",
+            "(search_terms=%s, candidates=%d, new=%d, updated=%d, reeval=%d, fetch_errors=%d)",
             search_terms, len(all_candidates), len(new_trials),
-            len(updated_trials), len(reeval_list),
+            len(updated_trials), len(reeval_list), fetch_errors,
         )
         return
 
@@ -170,6 +185,7 @@ async def run_daily_ingestion(
     # Only trials that were previously in the DB may have admin-edited fields.
     trials_with_existing_edits = set(updated_trials) | set(reeval_list)
     existing_custom_map: dict[str, dict] = {}  # nct_id → {field: non-null value}
+    existing_approval_map: dict[str, dict] = {}  # nct_id → {approved_at, approved_by}
 
     if trials_with_existing_edits:
         fetched_existing_ids = {
@@ -187,6 +203,12 @@ async def run_daily_ingestion(
                             for field in _CUSTOM_FIELDS
                             if getattr(row, field) is not None
                         }
+                        # Capture approval metadata only from ClinicalTrial rows
+                        if isinstance(row, ClinicalTrial) and row.approved_at:
+                            existing_approval_map[row.nct_id] = {
+                                "approved_at": row.approved_at,
+                                "approved_by": row.approved_by,
+                            }
 
     # ──────────────────────────────────────────────────────────
     # STEP 4 — AI summarisation: populate custom_* fields
@@ -210,6 +232,7 @@ async def run_daily_ingestion(
     # ──────────────────────────────────────────────────────────
     processed = 0
     newly_irrelevant = 0
+    classify_errors = 0
 
     async with SessionLocal() as db:
         for trial_data in fetched:
@@ -219,6 +242,7 @@ async def run_daily_ingestion(
                 classification = await classify_trial(ai_client, trial_data)
             except Exception as exc:
                 logger.error("classify_trial raised for %s: %s", nct_id, exc)
+                classify_errors += 1
                 # Fail-safe: include for manual review rather than silently skip
                 from app.services.ai.schemas import ClassificationResult, RelevanceTier
                 classification = ClassificationResult(
@@ -230,6 +254,7 @@ async def run_daily_ingestion(
                 )
 
             if classification.is_relevant:
+                approval_history = existing_approval_map.get(nct_id, {})
                 trial = ClinicalTrial(
                     **trial_data,
                     status=TrialStatus.PENDING_REVIEW,
@@ -237,6 +262,8 @@ async def run_daily_ingestion(
                     ai_relevance_reason=classification.reason,
                     ai_relevance_tier=classification.relevance_tier.value,
                     ai_matching_criteria=json.dumps(classification.matching_criteria),
+                    previous_approved_at=approval_history.get("approved_at"),
+                    previous_approved_by=approval_history.get("approved_by"),
                 )
                 await db.merge(trial)
 
@@ -263,17 +290,35 @@ async def run_daily_ingestion(
         await db.commit()
 
     # ──────────────────────────────────────────────────────────
-    # STEP 7 — Log run summary
+    # STEP 7 — Write ingestion run record + log summary
     # ──────────────────────────────────────────────────────────
+    async with SessionLocal() as db:
+        db.add(IngestionRun(
+            run_at=datetime.utcnow(),
+            search_terms=json.dumps(search_terms),
+            candidates_found=len(all_candidates),
+            new_trials=len(new_trials),
+            updated_trials=len(updated_trials),
+            reeval_trials=len(reeval_list),
+            relevant_processed=processed,
+            irrelevant_processed=newly_irrelevant,
+            fetch_errors=fetch_errors,
+            classify_errors=classify_errors,
+        ))
+        await db.commit()
+
     logger.info(
         "Ingestion complete: %d new, %d updated, %d re-evaluated | "
         "%d relevant (PENDING_REVIEW), %d irrelevant | "
+        "%d fetch errors, %d classify errors | "
         "search_terms=%s, total_candidates=%d",
         len(new_trials),
         len(updated_trials),
         len(reeval_list),
         processed,
         newly_irrelevant,
+        fetch_errors,
+        classify_errors,
         search_terms,
         len(all_candidates),
     )

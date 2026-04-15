@@ -19,6 +19,7 @@ class AIClient:
             or not str(resolved_api_key).strip()
             or "your_openai_api_key" in str(resolved_api_key).lower()
             or "changeme" in str(resolved_api_key).lower()
+            or "not set" in str(resolved_api_key).lower()
         ):
             raise RuntimeError(
                 "OPENAI_API_KEY is not configured. Set a valid key in "
