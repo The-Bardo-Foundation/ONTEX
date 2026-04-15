@@ -7,8 +7,16 @@ import requests
 API_STUDIES = "https://clinicaltrials.gov/api/v2/studies"
 
 
-# Helper to safely access nested dicts
 def _safe_get(d: Dict, path: Tuple[str, ...], default=None):
+    """
+    Traverse a nested dict by a sequence of keys, returning *default* if any
+    key is missing or the value at that level is not a dict.
+
+    Args:
+        d:       The dict to traverse.
+        path:    A tuple of keys forming the access path (e.g. ("a", "b", "c")).
+        default: Value returned when the path cannot be followed.
+    """
     cur = d
     for key in path:
         if not isinstance(cur, dict) or key not in cur:
@@ -21,7 +29,7 @@ def iter_study_index_rows(
     search_term: str = "osteosarcoma",
     query_mode: str = "term",
     page_size: int = 100,
-    sleep_seconds: float = 0.0,  # small delay between requests to avoid rate limiting
+    sleep_seconds: float = 0.0,
     session: Optional[requests.Session] = None,
 ) -> Iterator[Tuple[str, str]]:
     """
@@ -48,7 +56,6 @@ def iter_study_index_rows(
     s = session or requests.Session()
     page_token: Optional[str] = None
 
-    # Limit payload to the exact fields you need
     fields = ",".join(
         [
             "protocolSection.identificationModule.nctId",
@@ -100,6 +107,20 @@ def export_index_csv(
     page_size: int = 100,
     sleep_seconds: float = 0.0,
 ) -> None:
+    """
+    Write all matching study index rows to a CSV file.
+
+    Iterates iter_study_index_rows with the provided parameters and writes
+    one row per study to *out_csv_path* with columns [nct_id, last_update_posted_date].
+    Intended as a CLI utility / one-off data export.
+
+    Args:
+        out_csv_path:  Path to the output CSV file (created or overwritten).
+        search_term:   Search text forwarded to iter_study_index_rows.
+        query_mode:    Query mode forwarded to iter_study_index_rows.
+        page_size:     API page size forwarded to iter_study_index_rows.
+        sleep_seconds: Delay between API pages forwarded to iter_study_index_rows.
+    """
     with (
         requests.Session() as s,
         open(out_csv_path, "w", newline="", encoding="utf-8") as f,

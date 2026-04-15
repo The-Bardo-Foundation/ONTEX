@@ -1,16 +1,28 @@
-import requests
+"""
+Fetches and prints clinical trial data from the ClinicalTrials.gov API v2.
 
+Used as a diagnostic/debug helper during ingestion development.
+For bulk index fetching see study_index.iter_study_index_rows.
 """
-This script fetches clinical trial data from ClinicalTrials.gov API v2
-and formats it into a readable template.
-"""
+
+import requests
 
 
 def get_trial_data(nct_id):
-    # API v2 endpoint for a single study
+    """
+    Fetch a single study from ClinicalTrials.gov and print a human-readable summary.
+
+    Requests a subset of fields from the API v2 single-study endpoint and
+    prints the title, status, eligibility criteria, interventions, and contact
+    details to stdout.  Intended for local debugging/inspection.
+
+    Args:
+        nct_id: The NCT identifier string (e.g. "NCT04132895").
+    """
+
     url = f"https://clinicaltrials.gov/api/v2/studies/{nct_id}"
 
-    # Selecting the specific fields needed for your template
+    # Request only the fields we display so the response payload stays small
     params = {
         "fields": (
             "protocolSection.identificationModule.officialTitle,"
@@ -29,7 +41,6 @@ def get_trial_data(nct_id):
         response.raise_for_status()
         study = response.json()
 
-        # Accessing nested data safely
         protocol = study.get("protocolSection", {})
         ident = protocol.get("identificationModule", {})
         status = protocol.get("statusModule", {})
@@ -40,7 +51,7 @@ def get_trial_data(nct_id):
             "interventions", []
         )
 
-        # Format Eligibility Criteria (Split Inclusion/Exclusion)
+        # Split the combined eligibility text into inclusion and exclusion sections
         criteria = eligibility.get("eligibilityCriteria", "")
         inclusion = "Not specified"
         exclusion = "Not specified"
@@ -49,7 +60,6 @@ def get_trial_data(nct_id):
             inclusion = parts[0].replace("Inclusion Criteria:", "").strip()
             exclusion = parts[1].strip()
 
-        # Build the Template Output
         print(f"--- {ident.get('officialTitle')} ---")
         print(
             f"Last Update Posted: "

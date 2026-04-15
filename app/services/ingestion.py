@@ -8,9 +8,9 @@ It syncs our database with ClinicalTrials.gov for a list of search terms.
 
 EXISTING CODE USED
 ==================
-- scripts.ctg_study_index.iter_study_index_rows(search_term, ...)
+- app.services.ctgov.study_index.iter_study_index_rows(search_term, ...)
     → yields (nct_id, last_update_posted_date) for every study matching a term.
-- scripts.ctg_study_detail.get_trial_data(nct_id)
+- app.services.ctgov.study_detail.get_trial_data(nct_id)
     → fetches full study JSON from ClinicalTrials.gov API v2.
 
 DATABASE TABLES (see app.db.models)
@@ -59,7 +59,14 @@ AI SERVICES (to be implemented by another developer)
     Returns False → store in IrrelevantTrial with a reason.
 """
 
+import asyncio
 from typing import List
+
+from sqlalchemy import select
+
+from app.db.database import SessionLocal
+from app.db.models import ClinicalTrial, IrrelevantTrial
+from app.services.ctgov import iter_study_index_rows
 
 
 async def run_daily_ingestion(
@@ -70,50 +77,72 @@ async def run_daily_ingestion(
 
     # ──────────────────────────────────────────────────────────
     # STEP 1 — Collect NCT IDs + last-update dates for each term
-    # Uses: scripts.ctg_study_index.iter_study_index_rows (already implemented)
     # ──────────────────────────────────────────────────────────
-    #
-    #   all_candidates = {}                 # nct_id → last_update_posted_date
-    #
-    #   for term in search_terms:
-    #       for nct_id, last_update in iter_study_index_rows(search_term=term):
-    #           all_candidates[nct_id] = last_update
-    #
-    #   → Result: a dict of every NCT ID that ClinicalTrials.gov returned
-    #     for our search terms, together with the date it was last updated.
+    # nct_id → last_update_posted_date (ISO 8601 string or "" if unknown)
+    all_candidates: dict[str, str] = {}
+
+    for term in search_terms:
+        # iter_study_index_rows is a blocking generator; run it in a thread
+        # pool so it does not block the async event loop.
+        rows = await asyncio.to_thread(
+            lambda t=term: list(iter_study_index_rows(search_term=t))
+        )
+        for nct_id, last_update in rows:
+            # Later search terms overwrite earlier ones for the same NCT ID;
+            # the date is the same regardless of which term matched.
+            all_candidates[nct_id] = last_update
 
     # ──────────────────────────────────────────────────────────
     # STEP 2 — Classify each NCT ID against our database
-    # Three groups:
+    # Three possible outcomes per candidate:
+    #   new_trials     – NCT not in either table → fetch & process
+    #   updated_trials – NCT in ClinicalTrial but date changed → re-fetch
+    #   rejected_hits  – NCT in IrrelevantTrial → policy TBD (step 6)
     # ──────────────────────────────────────────────────────────
-    #
-    #   new_trials     = []    # NCT not in either table         → must fetch & process
-    #   updated_trials = []    # NCT in ClinicalTrial but date changed → must re-fetch
-    #   rejected_hits  = []    # NCT in IrrelevantTrial          → check date (TBD policy)
-    #
-    #   for nct_id, api_date in all_candidates.items():
-    #
-    #       existing = db.query(ClinicalTrial).get(nct_id)
-    #       if existing:
-    #           if existing.last_update_post_date != api_date:
-    #               updated_trials.append(nct_id)
-    #           # else: unchanged → skip, nothing to do
-    #           continue
-    #
-    #       rejected = db.query(IrrelevantTrial).get(nct_id)
-    #       if rejected:
-    #           rejected_hits.append((nct_id, api_date, rejected.last_update_post_date))
-    #           # TBD: policy for whether to re-evaluate rejected trials
-    #           #   - if date changed → maybe re-fetch and re-classify
-    #           #   - if date unchanged → skip
-    #           continue
-    #
-    #       new_trials.append(nct_id)
+    new_trials: list[str] = []
+    updated_trials: list[str] = []
+    rejected_hits: list[tuple[str, str, str | None]] = []
+
+    candidate_ids = list(all_candidates.keys())
+
+    async with SessionLocal() as db:
+        # Fetch last-update dates for every candidate already in ClinicalTrial
+        result = await db.execute(
+            select(ClinicalTrial.nct_id, ClinicalTrial.last_update_post_date)
+            .where(ClinicalTrial.nct_id.in_(candidate_ids))
+        )
+        # Map: nct_id → stored last_update_post_date (may be None if not recorded)
+        existing_map = {row.nct_id: row.last_update_post_date for row in result}
+
+        # Fetch last-update dates for every candidate already in IrrelevantTrial
+        result = await db.execute(
+            select(IrrelevantTrial.nct_id, IrrelevantTrial.last_update_post_date)
+            .where(IrrelevantTrial.nct_id.in_(candidate_ids))
+        )
+        # Map: nct_id → stored last_update_post_date (may be None if not recorded)
+        rejected_map = {row.nct_id: row.last_update_post_date for row in result}
+
+    for nct_id, api_date in all_candidates.items():
+        if nct_id in existing_map:
+            # Coerce None → "" so that a missing DB date does not falsely
+            # trigger an update when the API also returns no date.
+            db_date = existing_map[nct_id] or ""
+            if db_date != api_date:
+                updated_trials.append(nct_id)
+            continue
+
+        if nct_id in rejected_map:
+            # Keep the stored date alongside the API date so step 6 can
+            # decide whether to re-evaluate (date changed) or skip.
+            rejected_hits.append((nct_id, api_date, rejected_map[nct_id]))
+            continue
+
+        new_trials.append(nct_id)
 
     # ──────────────────────────────────────────────────────────
     # STEP 3 — Fetch full study data for trials that need processing
     # Uses: ClinicalTrials.gov API v2  GET /api/v2/studies/{nct_id}
-    # (see scripts.ctg_study_detail for reference implementation)
+    # (see app.services.ctgov.study_detail for reference implementation)
     # ──────────────────────────────────────────────────────────
     #
     #   trials_to_process = new_trials + updated_trials
@@ -210,3 +239,7 @@ async def run_daily_ingestion(
         "pipeline or disable the scheduled job and related endpoints before "
         "enabling this in production."
     )
+
+
+if __name__ == "__main__":
+    asyncio.run(run_daily_ingestion())
