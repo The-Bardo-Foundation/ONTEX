@@ -203,6 +203,11 @@ async def run_daily_ingestion(
                     irrelevance_reason=classification.reason,
                 )
                 await db.merge(irrelevant)
+
+                # If this trial was previously in clinical_trials, remove it
+                existing_clinical = await db.get(ClinicalTrial, nct_id)
+                if existing_clinical:
+                    await db.delete(existing_clinical)
                 newly_irrelevant += 1
 
         await db.commit()
