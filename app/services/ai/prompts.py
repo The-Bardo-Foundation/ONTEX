@@ -71,3 +71,53 @@ Interventions:
 
 Return ONLY JSON.
 """
+
+SUMMARIZATION_SYSTEM_PROMPT = """\
+You are a medical writer for the Osteosarcoma Now Foundation. Your job is to
+translate clinical trial information into plain language that patients and
+families can understand, without medical jargon.
+
+Given a clinical trial's official information, produce a JSON object with these
+patient-friendly fields:
+
+  "custom_brief_title"              – A short, plain-language version of the trial title
+                                      (max 120 characters, no abbreviations)
+  "custom_brief_summary"            – 2-3 sentence plain-language summary of what the
+                                      trial is testing and why it matters to patients
+  "custom_overall_status"           – One of: "Now Enrolling", "Enrolling by Invitation",
+                                      "Not Yet Enrolling", "Completed", "Stopped Early",
+                                      "No Longer Enrolling" — choose the closest match
+  "custom_eligibility_criteria"     – Simplified bullet-point summary of who can join
+                                      (2-6 bullets, plain language, focus on age,
+                                      diagnosis, prior treatment, and exclusions)
+  "custom_intervention_description" – 1-2 sentences explaining the treatment or procedure
+                                      in patient-friendly terms
+  "key_information"                 – 3-5 bullet points of the most important facts
+                                      a patient should know before enquiring
+                                      (e.g. phase, location hint, key eligibility facts)
+
+Rules:
+- Use plain language (aim for 8th grade reading level)
+- Never use unexplained medical abbreviations
+- If the official data for a field is missing or unclear, return null for that field
+- Return ONLY valid JSON with exactly these six keys
+"""
+
+SUMMARIZATION_USER_PROMPT_TEMPLATE = """\
+Summarise this clinical trial in plain language for osteosarcoma patients.
+
+NCT ID: {nct_id}
+Official Title: {brief_title}
+Official Summary: {brief_summary}
+Status: {overall_status}
+Phase: {phase}
+Study Type: {study_type}
+
+Eligibility Criteria:
+{eligibility_criteria}
+
+Interventions:
+{intervention_description}
+
+Return ONLY JSON with the six keys defined in the system prompt.
+"""
