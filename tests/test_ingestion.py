@@ -69,33 +69,28 @@ def make_trial_dict(
         "eligibility_criteria": "Inclusion: osteosarcoma diagnosis",
         "intervention_description": "Drug: TestDrug",
         "last_update_post_date": last_update,
-        # custom_* fields start as None (populated by AI summarisation)
-        "custom_brief_title": None,
+        # custom_* fields: passthroughs from official data except custom_brief_summary
+        "custom_brief_title": brief_title,
         "custom_brief_summary": None,
-        "custom_overall_status": None,
-        "custom_phase": None,
-        "custom_study_type": None,
-        "custom_location_country": None,
-        "custom_location_city": None,
-        "custom_minimum_age": None,
-        "custom_maximum_age": None,
+        "custom_overall_status": "RECRUITING",
+        "custom_phase": "Phase 2",
+        "custom_study_type": "INTERVENTIONAL",
+        "custom_location_country": "Norway",
+        "custom_location_city": "Oslo",
+        "custom_minimum_age": "5 Years",
+        "custom_maximum_age": "25 Years",
         "custom_central_contact_name": None,
         "custom_central_contact_phone": None,
         "custom_central_contact_email": None,
-        "custom_eligibility_criteria": None,
-        "custom_intervention_description": None,
-        "custom_last_update_post_date": None,
+        "custom_eligibility_criteria": "Inclusion: osteosarcoma diagnosis",
+        "custom_intervention_description": "Drug: TestDrug",
+        "custom_last_update_post_date": last_update,
         "key_information": None,
     }
 
 
 FAKE_AI_SUMMARIES = {
-    "custom_brief_title": "AI-generated title",
     "custom_brief_summary": "AI-generated summary",
-    "custom_overall_status": "Now Enrolling",
-    "custom_eligibility_criteria": "Must have osteosarcoma",
-    "custom_intervention_description": "A new targeted drug",
-    "key_information": "Phase 2, recruiting in Norway",
 }
 
 NULL_AI_SUMMARIES = {field: None for field in FAKE_AI_SUMMARIES}
@@ -170,7 +165,9 @@ async def test_new_relevant_trial_stored_as_pending_review(tmp_path, monkeypatch
         assert trial is not None
         assert trial.status == TrialStatus.PENDING_REVIEW
         assert trial.brief_title == "Test Osteosarcoma Trial"
-        assert trial.custom_brief_title == "AI-generated title"
+        assert trial.custom_brief_summary == "AI-generated summary"
+        # custom_brief_title is a passthrough from the API, not AI-generated
+        assert trial.custom_brief_title == "Test Osteosarcoma Trial"
 
     await engine.dispose()
 
@@ -530,7 +527,9 @@ async def test_ai_summarisation_failure_trial_still_processed(tmp_path, monkeypa
         trial = await db.get(ClinicalTrial, "NCT88888888")
         assert trial is not None
         assert trial.status == TrialStatus.PENDING_REVIEW
-        assert trial.custom_brief_title is None
+        # custom_brief_title is a passthrough, so it should have the API value
+        assert trial.custom_brief_title == "Test Osteosarcoma Trial"
+        # custom_brief_summary is AI-generated, so it should be None on failure
         assert trial.custom_brief_summary is None
 
     await engine.dispose()
@@ -637,8 +636,8 @@ async def test_admin_edited_custom_fields_preserved_on_update(tmp_path, monkeypa
         assert trial is not None
         # Admin-edited field must be preserved
         assert trial.custom_brief_summary == admin_summary
-        # Fields that were null may be filled in by AI
-        assert trial.custom_brief_title == "AI-generated title"
+        # custom_brief_title is a passthrough from the API, not AI-generated
+        assert trial.custom_brief_title == "Test Osteosarcoma Trial"
 
     await engine.dispose()
 
@@ -661,8 +660,9 @@ def test_map_api_to_model_missing_brief_title_uses_fallback():
     assert result["brief_title"] == "Title not available"
 
 
-def test_map_api_to_model_populates_all_custom_fields_as_none():
-    """All custom_* fields produced by map_api_to_model should be None initially."""
+def test_map_api_to_model_passthroughs_and_none_fields():
+    """custom_brief_summary and key_information should be None; other custom_* fields
+    should be passthroughs from their corresponding official API fields."""
     raw = {
         "protocolSection": {
             "identificationModule": {
@@ -672,9 +672,25 @@ def test_map_api_to_model_populates_all_custom_fields_as_none():
         }
     }
     result = map_api_to_model(raw)
-    custom_keys = [k for k in result if k.startswith("custom_") or k == "key_information"]
-    for key in custom_keys:
-        assert result[key] is None, f"Expected {key} to be None, got {result[key]!r}"
+    # These two should always be None (AI-generated / admin-filled)
+    assert result["custom_brief_summary"] is None
+    assert result["key_information"] is None
+    # custom_brief_title should match brief_title
+    assert result["custom_brief_title"] == result["brief_title"]
+    # Other passthrough fields should match their official counterparts
+    assert result["custom_overall_status"] == result["overall_status"]
+    assert result["custom_phase"] == result["phase"]
+    assert result["custom_study_type"] == result["study_type"]
+    assert result["custom_location_country"] == result["location_country"]
+    assert result["custom_location_city"] == result["location_city"]
+    assert result["custom_minimum_age"] == result["minimum_age"]
+    assert result["custom_maximum_age"] == result["maximum_age"]
+    assert result["custom_central_contact_name"] == result["central_contact_name"]
+    assert result["custom_central_contact_phone"] == result["central_contact_phone"]
+    assert result["custom_central_contact_email"] == result["central_contact_email"]
+    assert result["custom_eligibility_criteria"] == result["eligibility_criteria"]
+    assert result["custom_intervention_description"] == result["intervention_description"]
+    assert result["custom_last_update_post_date"] == result["last_update_post_date"]
 
 
 def test_map_api_to_model_extracts_interventions():

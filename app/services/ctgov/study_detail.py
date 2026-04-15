@@ -99,40 +99,56 @@ def map_api_to_model(raw_json: dict) -> dict:
     phases = design.get("phases") or []
     phase = ", ".join(phases) if phases else None
 
+    # Official field values
+    brief_title = _get(ident, "briefTitle") or "Title not available"
+    brief_summary = _get(description, "briefSummary")
+    overall_status = _get(status_mod, "overallStatus")
+    study_type = _get(design, "studyType")
+    location_country = ", ".join(countries) if countries else None
+    location_city = ", ".join(cities) if cities else None
+    minimum_age = _get(eligibility, "minimumAge")
+    maximum_age = _get(eligibility, "maximumAge")
+    contact_name = contact.get("name")
+    contact_phone = contact.get("phone")
+    contact_email = contact.get("email")
+    eligibility_criteria = _get(eligibility, "eligibilityCriteria")
+    last_update_post_date = _get(status_mod, "lastUpdatePostDateStruct", "date")
+
     return {
         # Official fields
         "nct_id": _get(ident, "nctId"),
-        "brief_title": _get(ident, "briefTitle") or "Title not available",
-        "brief_summary": _get(description, "briefSummary"),
-        "overall_status": _get(status_mod, "overallStatus"),
+        "brief_title": brief_title,
+        "brief_summary": brief_summary,
+        "overall_status": overall_status,
         "phase": phase,
-        "study_type": _get(design, "studyType"),
-        "location_country": ", ".join(countries) if countries else None,
-        "location_city": ", ".join(cities) if cities else None,
-        "minimum_age": _get(eligibility, "minimumAge"),
-        "maximum_age": _get(eligibility, "maximumAge"),
-        "central_contact_name": contact.get("name"),
-        "central_contact_phone": contact.get("phone"),
-        "central_contact_email": contact.get("email"),
-        "eligibility_criteria": _get(eligibility, "eligibilityCriteria"),
+        "study_type": study_type,
+        "location_country": location_country,
+        "location_city": location_city,
+        "minimum_age": minimum_age,
+        "maximum_age": maximum_age,
+        "central_contact_name": contact_name,
+        "central_contact_phone": contact_phone,
+        "central_contact_email": contact_email,
+        "eligibility_criteria": eligibility_criteria,
         "intervention_description": intervention_description,
-        "last_update_post_date": _get(status_mod, "lastUpdatePostDateStruct", "date"),
-        # custom_* fields are populated by ai_generate_summaries in Step 4
-        "custom_brief_title": None,
+        "last_update_post_date": last_update_post_date,
+        # custom_* fields: most are passthroughs from official API data.
+        # Only custom_brief_summary is populated by AI in Step 4.
+        "custom_brief_title": brief_title,
         "custom_brief_summary": None,
-        "custom_overall_status": None,
-        "custom_phase": None,
-        "custom_study_type": None,
-        "custom_location_country": None,
-        "custom_location_city": None,
-        "custom_minimum_age": None,
-        "custom_maximum_age": None,
-        "custom_central_contact_name": None,
-        "custom_central_contact_phone": None,
-        "custom_central_contact_email": None,
-        "custom_eligibility_criteria": None,
-        "custom_intervention_description": None,
-        "custom_last_update_post_date": None,
+        "custom_overall_status": overall_status,
+        "custom_phase": phase,
+        "custom_study_type": study_type,
+        "custom_location_country": location_country,
+        "custom_location_city": location_city,
+        "custom_minimum_age": minimum_age,
+        "custom_maximum_age": maximum_age,
+        "custom_central_contact_name": contact_name,
+        "custom_central_contact_phone": contact_phone,
+        "custom_central_contact_email": contact_email,
+        "custom_eligibility_criteria": eligibility_criteria,
+        "custom_intervention_description": intervention_description,
+        "custom_last_update_post_date": last_update_post_date,
         "key_information": None,
     }
 
