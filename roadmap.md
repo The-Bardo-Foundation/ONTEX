@@ -12,35 +12,40 @@ The project has solid infrastructure in place, but the core ingestion pipeline i
 - Database schema (`clinical_trials` and `irrelevant_trials` tables, dual-field `official` + `custom_*` pattern)
 - Alembic migrations (schema versioning)
 - ClinicalTrials.gov API v2 integration — trial index fetching (`study_index.py`) and trial detail fetching (`study_detail.py`)
-- LLM prompt templates for relevance classification
+- LLM prompt templates for relevance classification and AI summarisation
 - OpenAI async client wrapper with retry logic and fail-safe behaviour
-- Classifier skeleton (`classifier.py`) including confidence-threshold override
+- Relevance classifier (`classifier.py`) — fully wired, Pydantic v2, reads confidence threshold from config
+- AI summariser (`summarizer.py`) — generates patient-friendly `custom_*` fields; fail-safe on LLM error
+- **Full ingestion pipeline** (`ingestion.py`) — Steps 1–7 implemented end-to-end:
+  - Fetches NCT IDs, detects new/updated/rejected, fetches full study data,
+    generates AI summaries, classifies relevance, upserts to DB, re-evaluates
+    updated rejected trials, logs run summary
+- `config.py` extended with `SEARCH_TERMS`, `INGESTION_SCHEDULE_HOURS`, `AI_MODEL`, `CONFIDENCE_THRESHOLD`, `PAGE_SIZE`
+- `openai` added to `requirements.txt`
+- Migration `002_add_ai_classification_columns` — adds `ai_relevance_confidence`, `ai_relevance_reason`, `ai_relevance_tier`, `ai_matching_criteria` to `clinical_trials`
 - FastAPI backend with `GET /api/v1/trials` and `PATCH /api/v1/trials/{nct_id}`
 - SQLAdmin panel for manual trial management
 - React frontend with sidebar, trial detail view, and approve/reject buttons
-- APScheduler wired to run ingestion every 24 hours (but the job raises `NotImplementedError`)
+- APScheduler running ingestion on configurable schedule (default 24 h), using `settings.SEARCH_TERMS`
 - Development environment (Docker/SQLite), Railway deployment, GitHub Actions CI
 
 ### Not done (blocking)
-- `ingestion.py` — Steps 3–7 are not implemented (full trial fetch, AI summarization, relevance classification, database writes, update detection)
-- `ai_generate_summaries()` — patient-friendly summaries for all `custom_*` fields do not exist yet
 - Authentication and user management
 - Full trial detail API endpoint
 - Admin review queue (new/updated trials)
 - Reviewer notes and audit log
 - Search and filtering in both API and frontend
-- Config file for search terms and ingestion settings
-- Tests beyond two basic happy-path API tests
+- Tests beyond two basic happy-path API tests (ingestion pipeline tests are Phase 2)
 
 ---
 
 ## Phases
 
-### Phase 1 — Complete the ingestion pipeline
+### Phase 1 — Complete the ingestion pipeline ✅ (1.1–1.4 done)
 
 This is the critical path. Nothing else matters until data flows end-to-end.
 
-#### 1.1 Fix requirements and configuration
+#### 1.1 Fix requirements and configuration ✅
 
 - Add `openai` to `requirements.txt` (currently missing — the code imports it but it is not listed)
 - Add a `config.yaml` (or extend `core/config.py`) for ingestion settings:
@@ -51,13 +56,13 @@ This is the critical path. Nothing else matters until data flows end-to-end.
   - `page_size: 100`
 - Settings in this file should be readable from `app/core/config.py` so the scheduler and pipeline can consume them without hardcoding
 
-#### 1.2 Implement `ingestion.py` Step 3 — fetch full trial data
+#### 1.2 Implement `ingestion.py` Step 3 — fetch full trial data ✅
 
 - For each NCT ID identified as new or needing re-evaluation, call `study_detail.py` to get the full study JSON
 - Map every field from the ClinicalTrials.gov response to the corresponding `official_*` columns in `ClinicalTrial` / `IrrelevantTrial`
 - Handle missing fields gracefully (nullable columns exist in the schema already)
 
-#### 1.3 Implement `ingestion.py` Step 4 — AI summarization
+#### 1.3 Implement `ingestion.py` Step 4 — AI summarization ✅
 
 Create a new function `ai_generate_summaries(client, trial_data: dict) -> dict` in `app/services/ai/`:
 
@@ -65,20 +70,11 @@ Create a new function `ai_generate_summaries(client, trial_data: dict) -> dict` 
 - Output: dict of `custom_*` values to write to the database
 - One LLM call per trial (or batched if costs are a concern)
 - Fields to generate:
-  - `custom_brief_title` — plain-language title a patient would understand
-  - `custom_brief_summary` — 2–4 sentence patient-friendly summary of the trial
-  - `custom_overall_status` — plain-language explanation of recruiting status
-  - `custom_phase` — explanation of what Phase 1/2/3 means for this trial
-  - `custom_study_type` — plain-language explanation
-  - `custom_eligibility_criteria` — reformatted and simplified inclusion/exclusion criteria
-  - `custom_intervention_description` — what is actually being tested, in plain language
-  - `custom_minimum_age` / `custom_maximum_age` — plain-language age eligibility
-  - `key_information` — 3–5 bulleted key facts a patient or caregiver would want to know immediately
-  - `custom_location_country` / `custom_location_city` — cleaned and formatted location info
+  - `custom_brief_summary` — Short patient-friendly summary of the trial
 - Write a system prompt for summarization (analogous to the existing classification prompt in `prompts.py`)
 - Fail-safe: if the LLM call fails, set all `custom_*` fields to `None` and let the admin fill them in manually
 
-#### 1.4 Implement `ingestion.py` Step 5 — relevance classification and database writes
+#### 1.4 Implement `ingestion.py` Step 5 — relevance classification and database writes ✅
 
 - Wire `classifier.py` into the pipeline: call `classify_trial()` with the full trial data
 - Based on the result:

@@ -6,6 +6,7 @@ asyncpg
 alembic
 sqladmin
 apscheduler
+openai
 python-multipart
 python-jose[cryptography]
 passlib[bcrypt]

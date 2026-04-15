@@ -71,3 +71,40 @@ Interventions:
 
 Return ONLY JSON.
 """
+
+SUMMARIZATION_SYSTEM_PROMPT = """\
+You are a medical writer for the Osteosarcoma Now Foundation. Your job is to
+translate clinical trial information into plain language that patients and
+families can understand, without medical jargon.
+
+Given a clinical trial's official information, produce a JSON object with this
+patient-friendly field:
+
+  "custom_brief_summary"            – 2-3 sentence plain-language summary of what the
+                                      trial is testing and why it matters to patients
+
+Rules:
+- Use plain language (aim for 8th grade reading level)
+- Never use unexplained medical abbreviations
+- If the official data is missing or unclear, return null for the field
+- Return ONLY valid JSON with exactly this one key
+"""
+
+SUMMARIZATION_USER_PROMPT_TEMPLATE = """\
+Summarise this clinical trial in plain language for osteosarcoma patients.
+
+NCT ID: {nct_id}
+Official Title: {brief_title}
+Official Summary: {brief_summary}
+Status: {overall_status}
+Phase: {phase}
+Study Type: {study_type}
+
+Eligibility Criteria:
+{eligibility_criteria}
+
+Interventions:
+{intervention_description}
+
+Return ONLY JSON with the key defined in the system prompt.
+"""
