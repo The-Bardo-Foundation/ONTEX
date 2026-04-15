@@ -94,7 +94,12 @@ async def lifespan(app: FastAPI):
 
     print("startup: scheduling ingestion job")
     try:
-        scheduler.add_job(run_daily_ingestion, "interval", hours=24)
+        scheduler.add_job(
+            run_daily_ingestion,
+            "interval",
+            hours=settings.INGESTION_SCHEDULE_HOURS,
+            kwargs={"search_terms": settings.SEARCH_TERMS},
+        )
         print("startup: added ingestion job")
         scheduler.start()
         print("startup: scheduler.start() returned")
