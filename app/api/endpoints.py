@@ -7,7 +7,7 @@ from typing import AsyncGenerator, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from app.api.middleware import clerk_user
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -124,7 +124,7 @@ _CUSTOM_FIELDS = [
 
 
 class ApproveBody(BaseModel):
-    username: str = Field(min_length=1)
+    username: Optional[str] = None  # Ignored server-side; kept for API backwards-compat
     reviewer_notes: Optional[str] = None
     # All editable fields the reviewer may have updated in the review panel
     custom_brief_title: Optional[str] = None
@@ -146,7 +146,7 @@ class ApproveBody(BaseModel):
 
 
 class RejectBody(BaseModel):
-    username: str = Field(min_length=1)
+    username: Optional[str] = None  # Ignored server-side; kept for API backwards-compat
     reviewer_notes: Optional[str] = None
 
 
@@ -449,7 +449,7 @@ async def approve_trial(
 
     trial.status = TrialStatus.APPROVED
     trial.approved_at = datetime.utcnow()
-    trial.approved_by = body.username
+    trial.approved_by = _user.get("email") or _user.get("sub")
     trial.reviewer_notes = body.reviewer_notes
 
     for field in _CUSTOM_FIELDS:
@@ -478,7 +478,7 @@ async def reject_trial(
 
     trial.status = TrialStatus.REJECTED
     trial.rejected_at = datetime.utcnow()
-    trial.rejected_by = body.username
+    trial.rejected_by = _user.get("email") or _user.get("sub")
     trial.reviewer_notes = body.reviewer_notes
 
     await db.commit()
@@ -515,7 +515,7 @@ async def update_trial(
 # ──────────────────────────────────────────────────────────────────────────────
 
 @router.get("/ingestion/run-stream")
-async def run_ingestion_stream():
+async def run_ingestion_stream(_user: dict = Depends(clerk_user)):
     """
     Start the ingestion pipeline and stream progress events as Server-Sent Events.
 

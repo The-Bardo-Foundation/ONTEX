@@ -18,6 +18,7 @@ Usage:
         ...
 """
 
+import os
 import time
 from typing import Any, Optional
 
@@ -86,11 +87,11 @@ async def clerk_user(
     """
     FastAPI dependency that validates a Clerk Bearer JWT and returns the claims.
 
-    In local/test environments (ENVIRONMENT=local) JWT verification is skipped
-    so the test suite can call protected endpoints without a real token.
-    Raises HTTP 401 if the token is missing or invalid in other environments.
+    JWT verification is skipped only when SKIP_AUTH_FOR_TESTS=1 is explicitly
+    set (test runner only).  Never set this in production.
+    Raises HTTP 401 if the token is missing or invalid in all other cases.
     """
-    if settings.ENVIRONMENT == "local":
+    if os.getenv("SKIP_AUTH_FOR_TESTS") == "1":
         # Skip verification; return stub claims so tests pass unchanged.
         return {"sub": "local-admin", "email": "admin@local"}
 

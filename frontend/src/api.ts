@@ -78,8 +78,3 @@ export const rejectTrial = async (nct_id: string, body: RejectBody): Promise<Tri
   const response = await api.patch<TrialDetail>(`/trials/${nct_id}/reject`, body);
   return response.data;
 };
-
-export const runIngestion = async (): Promise<{ status: string }> => {
-  const response = await api.post<{ status: string }>('/debug/run-ingestion');
-  return response.data;
-};

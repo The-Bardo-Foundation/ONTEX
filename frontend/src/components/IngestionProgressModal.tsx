@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useAuth } from '@clerk/clerk-react';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -39,79 +40,110 @@ const PIPELINE_STEPS = [
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function IngestionProgressModal({ onClose }: { onClose: () => void }) {
+  const { getToken } = useAuth();
   const [steps, setSteps] = useState<StepDisplay[]>(
     PIPELINE_STEPS.map((s) => ({ id: s.id, label: s.label, state: 'waiting' }))
   );
   const [summary, setSummary] = useState<ProgressEvent | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [done, setDone] = useState(false);
-  const esRef = useRef<EventSource | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
-    const es = new EventSource(`${API_URL}/ingestion/run-stream`);
-    esRef.current = es;
+    const controller = new AbortController();
+    abortRef.current = controller;
 
-    es.onmessage = (e) => {
-      let event: ProgressEvent;
+    (async () => {
+      let token: string | null = null;
       try {
-        event = JSON.parse(e.data);
+        token = await getToken();
       } catch {
+        // getToken may throw in test/local environments — proceed without token
+      }
+
+      let response: Response;
+      try {
+        response = await fetch(`${API_URL}/ingestion/run-stream`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          signal: controller.signal,
+        });
+      } catch (err: unknown) {
+        if ((err as { name?: string }).name !== 'AbortError') {
+          setErrorMsg('Connection to server lost.');
+          setDone(true);
+        }
         return;
       }
 
-      if (event.step === 'error') {
-        setErrorMsg(event.message ?? 'Unknown error');
+      if (!response.ok || !response.body) {
+        setErrorMsg(`Server error: ${response.status}`);
         setDone(true);
-        es.close();
         return;
       }
 
-      if (event.step === 'complete') {
-        setSummary(event);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      const handleEvent = (event: ProgressEvent) => {
+        if (event.step === 'error') {
+          setErrorMsg(event.message ?? 'Unknown error');
+          setDone(true);
+          return;
+        }
+        if (event.step === 'complete') {
+          setSummary(event);
+          setSteps((prev) =>
+            prev.map((s) => (s.state === 'active' ? { ...s, state: 'done' } : s))
+          );
+          setDone(true);
+          return;
+        }
+        if (event.step === 'searching_done') {
+          setSteps((prev) =>
+            prev.map((s) =>
+              s.id === 'searching'
+                ? { ...s, state: 'done', note: `${event.count?.toLocaleString()} candidates found` }
+                : s
+            )
+          );
+          return;
+        }
         setSteps((prev) =>
-          prev.map((s) => (s.state === 'active' ? { ...s, state: 'done' } : s))
+          prev.map((s) => {
+            if (s.id !== event.step) return s;
+            return { ...s, state: 'active', count: event.count, total: event.total };
+          })
         );
-        setDone(true);
-        es.close();
-        return;
-      }
+      };
 
-      if (event.step === 'searching_done') {
-        setSteps((prev) =>
-          prev.map((s) =>
-            s.id === 'searching'
-              ? { ...s, state: 'done', note: `${event.count?.toLocaleString()} candidates found` }
-              : s
-          )
-        );
-        return;
+      try {
+        while (true) {
+          const { done: streamDone, value } = await reader.read();
+          if (streamDone) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+              handleEvent(JSON.parse(line.slice(6)));
+            } catch {
+              // malformed SSE line — skip
+            }
+          }
+        }
+      } catch (err: unknown) {
+        if ((err as { name?: string }).name !== 'AbortError') {
+          setErrorMsg('Connection to server lost.');
+          setDone(true);
+        }
       }
-
-      // Per-step progress update (searching / fetching_details / summarizing / classifying)
-      setSteps((prev) =>
-        prev.map((s) => {
-          if (s.id !== event.step) return s;
-          return {
-            ...s,
-            state: 'active',
-            count: event.count,
-            total: event.total,
-          };
-        })
-      );
-    };
-
-    es.onerror = () => {
-      if (!done) {
-        setErrorMsg('Connection to server lost.');
-        setDone(true);
-      }
-      es.close();
-    };
+    })();
 
     return () => {
-      es.close();
+      controller.abort();
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -161,7 +193,7 @@ export function IngestionProgressModal({ onClose }: { onClose: () => void }) {
         {!done && (
           <button
             onClick={() => {
-              esRef.current?.close();
+              abortRef.current?.abort();
               onClose();
             }}
             className="mt-5 w-full px-4 py-2 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"

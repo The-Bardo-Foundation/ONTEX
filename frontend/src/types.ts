@@ -78,7 +78,6 @@ export interface TrialsListResponse {
 }
 
 export interface ApproveBody {
-  username: string;
   reviewer_notes?: string;
   custom_brief_title?: string;
   custom_brief_summary?: string;
@@ -99,8 +98,7 @@ export interface ApproveBody {
 }
 
 export interface RejectBody {
-  username: string;
   reviewer_notes?: string;
 }
 
-export type CustomEdits = Partial<Omit<ApproveBody, 'username' | 'reviewer_notes'>>;
+export type CustomEdits = Partial<Omit<ApproveBody, 'reviewer_notes'>>;
