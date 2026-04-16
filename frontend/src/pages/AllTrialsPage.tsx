@@ -61,6 +61,93 @@ interface AllTrialsPageProps {
   adminMode?: boolean;
 }
 
+function CountryCombobox({
+  countries,
+  value,
+  onChange,
+}: {
+  countries: string[];
+  value: string | undefined;
+  onChange: (country: string | undefined) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setQuery('');
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  const filtered = query
+    ? countries.filter((c) => c.toLowerCase().includes(query.toLowerCase()))
+    : countries;
+
+  function select(country: string | undefined) {
+    onChange(country);
+    setQuery('');
+    setOpen(false);
+  }
+
+  return (
+    <div ref={containerRef} className="relative">
+      <div
+        className={`flex items-center border rounded px-2 py-1.5 bg-white cursor-text ${open ? 'border-blue-400 ring-1 ring-blue-400' : 'border-gray-300'}`}
+        onClick={() => setOpen(true)}
+      >
+        <input
+          type="text"
+          className="flex-1 text-sm outline-none bg-transparent min-w-0"
+          placeholder={value ?? 'All countries'}
+          value={query}
+          onFocus={() => setOpen(true)}
+          onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+        />
+        {value && !open && (
+          <button
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); select(undefined); }}
+            className="text-gray-400 hover:text-gray-600 ml-1 text-xs"
+            aria-label="Clear country"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+      {open && (
+        <ul className="absolute z-10 left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-white border border-gray-200 rounded shadow-md text-sm">
+          <li
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => select(undefined)}
+            className="px-3 py-1.5 cursor-pointer hover:bg-gray-50 text-gray-500 border-b border-gray-100"
+          >
+            All countries
+          </li>
+          {filtered.length === 0 ? (
+            <li className="px-3 py-1.5 text-gray-400 italic">No results</li>
+          ) : (
+            filtered.map((c) => (
+              <li
+                key={c}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => select(c)}
+                className={`px-3 py-1.5 cursor-pointer hover:bg-gray-50 ${c === value ? 'font-medium text-blue-600 bg-blue-50' : ''}`}
+              >
+                {c}
+              </li>
+            ))
+          )}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function FilterSection({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div>
@@ -290,16 +377,11 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
               <>
                 <div className="border-t border-gray-200" />
                 <FilterSection title="Country">
-                  <select
-                    className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm bg-white"
-                    value={params.country ?? ''}
-                    onChange={(e) => setParams((p) => ({ ...p, country: e.target.value || undefined, page: 1 }))}
-                  >
-                    <option value="">All countries</option>
-                    {facets.countries.map((c) => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
+                  <CountryCombobox
+                    countries={facets.countries}
+                    value={params.country}
+                    onChange={(c) => setParams((p) => ({ ...p, country: c, page: 1 }))}
+                  />
                 </FilterSection>
               </>
             )}
