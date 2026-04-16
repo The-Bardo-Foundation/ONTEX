@@ -1,16 +1,20 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { useAuth, useUser } from '@clerk/clerk-react';
 import { approveTrial, getTrial, rejectTrial } from '../api';
 import { TrialDetailView } from '../components/TrialDetailView';
 import type { CustomEdits, TrialDetail } from '../types';
 
-const REVIEWER_USERNAME = 'admin'; // Phase 4 will pull this from auth
-
 export function TrialDetailPage() {
   const { nct_id } = useParams<{ nct_id: string }>();
   const navigate = useNavigate();
+  const { isSignedIn } = useAuth();
+  const { user } = useUser();
   const [detail, setDetail] = useState<TrialDetail | null>(null);
   const [notFound, setNotFound] = useState(false);
+
+  const reviewerUsername =
+    user?.primaryEmailAddress?.emailAddress ?? user?.username ?? 'admin';
 
   useEffect(() => {
     if (!nct_id) return;
@@ -25,7 +29,7 @@ export function TrialDetailPage() {
   async function handleApprove(reviewerNotes: string, edits: CustomEdits) {
     if (!nct_id) return;
     const updated = await approveTrial(nct_id, {
-      username: REVIEWER_USERNAME,
+      username: reviewerUsername,
       reviewer_notes: reviewerNotes || undefined,
       ...edits,
     });
@@ -35,7 +39,7 @@ export function TrialDetailPage() {
   async function handleReject(reviewerNotes: string) {
     if (!nct_id) return;
     const updated = await rejectTrial(nct_id, {
-      username: REVIEWER_USERNAME,
+      username: reviewerUsername,
       reviewer_notes: reviewerNotes || undefined,
     });
     setDetail(updated);
@@ -61,13 +65,14 @@ export function TrialDetailPage() {
   }
 
   const isPending = detail.status === 'PENDING_REVIEW';
+  const canReview = isSignedIn && isPending;
 
   return (
     <div className="overflow-y-auto h-full">
       <TrialDetailView
         trial={detail}
-        onApprove={isPending ? handleApprove : undefined}
-        onReject={isPending ? handleReject : undefined}
+        onApprove={canReview ? handleApprove : undefined}
+        onReject={canReview ? handleReject : undefined}
       />
     </div>
   );

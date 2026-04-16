@@ -26,14 +26,21 @@ const SORT_OPTIONS = [
   { value: 'brief_title', label: 'Alphabetical' },
 ];
 
-export function AllTrialsPage() {
+interface AllTrialsPageProps {
+  /** Admin mode: shows all statuses and status filter. Default (public mode): APPROVED only. */
+  adminMode?: boolean;
+}
+
+export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
   const navigate = useNavigate();
   const [response, setResponse] = useState<TrialsListResponse | null>(null);
-  const [params, setParams] = useState<GetTrialsParams>({
+  const [params, setParams] = useState<GetTrialsParams>(() => ({
     page: 1,
     page_size: PAGE_SIZE,
     sort_by: 'last_update_post_date',
-  });
+    // Public mode always shows APPROVED trials only
+    status: adminMode ? undefined : 'APPROVED',
+  }));
   const [searchInput, setSearchInput] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -61,7 +68,9 @@ export function AllTrialsPage() {
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header bar */}
       <div className="px-6 py-4 border-b bg-white space-y-3">
-        <h1 className="text-base font-semibold text-gray-700">All Trials</h1>
+        <h1 className="text-base font-semibold text-gray-700">
+          {adminMode ? 'All Trials' : 'Clinical Trials'}
+        </h1>
         <input
           type="search"
           placeholder="Search by title, summary, or eligibility…"
@@ -70,22 +79,26 @@ export function AllTrialsPage() {
           className="w-full border border-gray-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
         />
         <div className="flex items-center gap-3 flex-wrap">
-          <select
-            className="border border-gray-300 rounded px-3 py-1.5 text-sm"
-            onChange={(e) => setFilter('status', e.target.value)}
-          >
-            {STATUS_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-          <select
-            className="border border-gray-300 rounded px-3 py-1.5 text-sm"
-            onChange={(e) => setFilter('ingestion_event', e.target.value)}
-          >
-            {EVENT_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
+          {adminMode && (
+            <select
+              className="border border-gray-300 rounded px-3 py-1.5 text-sm"
+              onChange={(e) => setFilter('status', e.target.value)}
+            >
+              {STATUS_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          )}
+          {adminMode && (
+            <select
+              className="border border-gray-300 rounded px-3 py-1.5 text-sm"
+              onChange={(e) => setFilter('ingestion_event', e.target.value)}
+            >
+              {EVENT_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          )}
           <select
             className="border border-gray-300 rounded px-3 py-1.5 text-sm"
             defaultValue="last_update_post_date"
@@ -119,8 +132,12 @@ export function AllTrialsPage() {
               <tr>
                 <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Title</th>
                 <th className="text-left px-3 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide w-24">Phase</th>
-                <th className="text-left px-3 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide w-32">Status</th>
-                <th className="text-left px-3 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide w-24">Event</th>
+                {adminMode && (
+                  <th className="text-left px-3 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide w-32">Status</th>
+                )}
+                {adminMode && (
+                  <th className="text-left px-3 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide w-24">Event</th>
+                )}
                 <th className="text-left px-3 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide w-28">Updated</th>
               </tr>
             </thead>
@@ -135,8 +152,12 @@ export function AllTrialsPage() {
                     {trial.brief_title}
                   </td>
                   <td className="px-3 py-3 text-gray-500 text-xs">{trial.phase ?? '—'}</td>
-                  <td className="px-3 py-3"><StatusBadge status={trial.status} /></td>
-                  <td className="px-3 py-3"><IngestionEventBadge event={trial.ingestion_event} /></td>
+                  {adminMode && (
+                    <td className="px-3 py-3"><StatusBadge status={trial.status} /></td>
+                  )}
+                  {adminMode && (
+                    <td className="px-3 py-3"><IngestionEventBadge event={trial.ingestion_event} /></td>
+                  )}
                   <td className="px-3 py-3 text-gray-400 text-xs">{trial.last_update_post_date ?? '—'}</td>
                 </tr>
               ))}

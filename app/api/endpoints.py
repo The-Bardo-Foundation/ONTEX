@@ -1,7 +1,11 @@
+import asyncio
+import json
 from datetime import datetime
-from typing import List, Optional
+from typing import AsyncGenerator, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from app.api.middleware import clerk_user
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +14,9 @@ from app.db.database import get_db
 from app.db.models import ClinicalTrial, IngestionEvent, TrialStatus
 
 router = APIRouter()
+
+# In-memory flag to prevent concurrent ingestion runs
+_ingestion_running = False
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Pydantic models
@@ -196,7 +203,10 @@ class PhpTrialResponse(BaseModel):
 # ──────────────────────────────────────────────────────────────────────────────
 
 @router.get("/trials/review-queue", response_model=List[TrialListItem])
-async def get_review_queue(db: AsyncSession = Depends(get_db)):
+async def get_review_queue(
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Return all PENDING_REVIEW trials, ordered by last update date."""
     stmt = (
         select(ClinicalTrial)
@@ -321,7 +331,12 @@ async def get_trial(nct_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.patch("/trials/{nct_id}/approve", response_model=TrialDetail)
-async def approve_trial(nct_id: str, body: ApproveBody, db: AsyncSession = Depends(get_db)):
+async def approve_trial(
+    nct_id: str,
+    body: ApproveBody,
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
     """
     Approve a trial.  Sets status=APPROVED, records approved_by/approved_at,
     and applies any custom field edits submitted alongside the approval.
@@ -348,7 +363,12 @@ async def approve_trial(nct_id: str, body: ApproveBody, db: AsyncSession = Depen
 
 
 @router.patch("/trials/{nct_id}/reject", response_model=TrialDetail)
-async def reject_trial(nct_id: str, body: RejectBody, db: AsyncSession = Depends(get_db)):
+async def reject_trial(
+    nct_id: str,
+    body: RejectBody,
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Reject a trial.  Sets status=REJECTED and records rejected_by/rejected_at."""
     stmt = select(ClinicalTrial).where(ClinicalTrial.nct_id == nct_id)
     result = await db.execute(stmt)
@@ -388,3 +408,62 @@ async def update_trial(
     await db.commit()
     await db.refresh(trial)
     return trial
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Ingestion SSE endpoint
+# ──────────────────────────────────────────────────────────────────────────────
+
+@router.get("/ingestion/run-stream")
+async def run_ingestion_stream():
+    """
+    Start the ingestion pipeline and stream progress events as Server-Sent Events.
+
+    Connects via EventSource; each event is a JSON object with a `step` field.
+    Only one ingestion run is allowed at a time — returns an error event if one
+    is already in progress.
+    """
+    global _ingestion_running
+
+    async def event_stream() -> AsyncGenerator[str, None]:
+        global _ingestion_running
+
+        if _ingestion_running:
+            yield f"data: {json.dumps({'step': 'error', 'message': 'Ingestion already running'})}\n\n"
+            return
+
+        _ingestion_running = True
+        queue: asyncio.Queue[Optional[dict]] = asyncio.Queue()
+
+        async def progress_callback(event: dict) -> None:
+            await queue.put(event)
+
+        async def run_and_signal() -> None:
+            try:
+                import app.services.ingestion as ingestion
+                await ingestion.run_daily_ingestion(progress_callback=progress_callback)
+            except Exception as exc:
+                await queue.put({"step": "error", "message": str(exc)})
+            finally:
+                await queue.put(None)  # sentinel
+
+        task = asyncio.create_task(run_and_signal())
+
+        try:
+            while True:
+                event = await queue.get()
+                if event is None:
+                    break
+                yield f"data: {json.dumps(event)}\n\n"
+        finally:
+            _ingestion_running = False
+            task.cancel()
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )

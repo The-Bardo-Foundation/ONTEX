@@ -13,6 +13,25 @@ export const api = axios.create({
   baseURL: API_URL,
 });
 
+// Token provider set by the ClerkProvider wrapper in App.tsx so the axios
+// instance can attach Bearer tokens to protected requests without every
+// component needing to handle auth.
+let _getToken: (() => Promise<string | null>) | null = null;
+
+export function setTokenProvider(getToken: () => Promise<string | null>): void {
+  _getToken = getToken;
+}
+
+api.interceptors.request.use(async (config) => {
+  if (_getToken) {
+    const token = await _getToken();
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  }
+  return config;
+});
+
 export interface GetTrialsParams {
   status?: string;
   q?: string;
