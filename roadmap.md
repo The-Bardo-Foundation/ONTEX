@@ -110,7 +110,7 @@ Create a new function `ai_generate_summaries(client, trial_data: dict) -> dict` 
 
 ### Phase 2 — Testing ✅
 
-38 tests passing. All LLM and HTTP calls mocked. In-memory SQLite for all tests.
+38 tests passing. All LLM and HTTP calls mocked. Temporary file-backed SQLite used for test isolation.
 
 #### 2.1 Ingestion pipeline tests ✅
 
