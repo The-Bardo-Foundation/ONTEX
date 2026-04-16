@@ -5,7 +5,13 @@ Pytest configuration and fixtures for test suite.
 import asyncio
 import os
 import sys
+from pathlib import Path
+from unittest.mock import AsyncMock
 
+import pytest
+import pytest_asyncio
+from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 def pytest_configure(config):
     """Set environment variables before any app module is imported.
@@ -18,13 +24,6 @@ def pytest_configure(config):
     os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
     os.environ["OPENAI_API_KEY"] = "sk-test-not-real"
     os.environ["SKIP_MIGRATIONS"] = "1"
-from pathlib import Path
-from unittest.mock import AsyncMock
-
-import pytest
-import pytest_asyncio
-from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 # Ensure repository root is on sys.path so `import app` works in CI
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
