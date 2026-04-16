@@ -38,7 +38,6 @@ The project has solid infrastructure in place, but the core ingestion pipeline i
 - Admin review queue (new/updated trials)
 - Reviewer notes and audit log
 - Search and filtering in both API and frontend
-- `test_get_trials_returns_list` in `test_api.py` is broken: module-level imports in `test_ingestion.py` cause the SQLAlchemy engine to be cached before the test's monkeypatch can redirect it — fix as part of Phase 2 test infrastructure
 
 ---
 
@@ -109,34 +108,39 @@ Create a new function `ai_generate_summaries(client, trial_data: dict) -> dict` 
 
 ---
 
-### Phase 2 — Testing
+### Phase 2 — Testing ✅
 
-Testing should be introduced alongside Phase 1 work, not after. The rule: each new function gets a test.
+38 tests passing. All LLM and HTTP calls mocked. Temporary file-backed SQLite used for test isolation.
 
-#### 2.1 Ingestion pipeline tests
+#### 2.1 Ingestion pipeline tests ✅
 
-- Unit test for categorisation logic (new / updated / already-rejected / no-change) using mock database state
-- Unit test for field mapping from ClinicalTrials.gov JSON to model fields
-- Integration test for a full ingestion run using a fixture with 3–5 realistic trial JSON objects (no real API calls, no real LLM calls)
+11 integration tests in `tests/test_ingestion.py`:
+- Categorisation logic (new / updated / already-rejected / no-change)
+- Field mapping from ClinicalTrials.gov JSON to model fields (`map_api_to_model`)
+- Full ingestion run with mocked API and LLM calls (all 7 pipeline steps)
+- AI fail-safe behaviour (summarisation failure, classification failure)
+- Admin-edited custom fields preserved on re-ingestion
 
-#### 2.2 AI service tests
+#### 2.2 AI service tests ✅
 
-- Unit test for `ai_generate_summaries()` with mocked LLM response
-- Unit test for `classify_trial()` — correct routing for `is_relevant=True/False`, confidence threshold override
-- Test fail-safe behaviour: verify that an LLM error returns the safe default and does not raise
+12 unit tests in `tests/test_ai_services.py`:
+- `ai_generate_summaries()`: success, LLM returns None (null dict), extra keys ignored
+- `classify_trial()`: relevant unchanged, irrelevant high-confidence unchanged, irrelevant low-confidence flipped to SECONDARY, no duplicate tags, threshold read from settings
+- `AIClient`: JSON parse success for generate and classify, all-retries-exhausted returns None / safe default
 
-#### 2.3 API endpoint tests
+#### 2.3 API endpoint tests ✅
 
-- Test `GET /api/v1/trials` with each status filter
-- Test `PATCH /api/v1/trials/{nct_id}` with valid and invalid status transitions
-- Test the new `/api/v1/trail` endpoint used by the PHP template
-- Test authentication (once implemented in Phase 3)
+12 tests in `tests/test_api.py`:
+- `GET /api/v1/trials`: empty list, status filter APPROVED, status filter PENDING_REVIEW
+- `PATCH /api/v1/trials/{nct_id}`: approve, reject, 404 not found, custom_brief_summary update
+- `GET /api/v1/trail`: 404 missing, 404 non-approved, 200 approved (full field validation)
+- `POST /api/v1/debug/run-ingestion`: scheduler integration
 
 #### 2.4 Test conventions
 
-- All tests use an in-memory SQLite database (already set up in `conftest.py`)
-- LLM calls are always mocked — never hit the real OpenAI API in tests
-- HTTP calls to ClinicalTrials.gov are always mocked — use `httpx.MockTransport` or `pytest-httpx`
+- `pytest_configure` hook in `conftest.py` sets `DATABASE_URL=sqlite+aiosqlite:///:memory:`, `OPENAI_API_KEY=sk-test-not-real`, `SKIP_MIGRATIONS=1` before any app module is imported — fixes the module-level SQLAlchemy engine isolation issue
+- Tests use SQLite for isolation; the `db_engine` fixture uses a temporary database file under `tmp_path` rather than a shared in-memory database
+- LLM calls always mocked; no real OpenAI API calls in tests
 - Tests run in GitHub Actions CI on every push
 
 ---
