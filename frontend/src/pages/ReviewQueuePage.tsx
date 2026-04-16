@@ -17,15 +17,37 @@ export function ReviewQueuePage() {
   }, []);
 
   useEffect(() => {
+    let isCurrent = true;
+
     if (!selectedId) {
       setDetail(null);
-      return;
+      setLoadingDetail(false);
+      return () => {
+        isCurrent = false;
+      };
     }
+
     setLoadingDetail(true);
     getTrial(selectedId)
-      .then(setDetail)
-      .catch(console.error)
-      .finally(() => setLoadingDetail(false));
+      .then((trialDetail) => {
+        if (isCurrent) {
+          setDetail(trialDetail);
+        }
+      })
+      .catch((error) => {
+        if (isCurrent) {
+          console.error(error);
+        }
+      })
+      .finally(() => {
+        if (isCurrent) {
+          setLoadingDetail(false);
+        }
+      });
+
+    return () => {
+      isCurrent = false;
+    };
   }, [selectedId]);
 
   async function handleApprove(reviewerNotes: string, edits: CustomEdits) {
