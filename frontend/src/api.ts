@@ -36,6 +36,8 @@ export interface GetTrialsParams {
   status?: string;
   q?: string;
   ingestion_event?: string;
+  phase?: string;
+  recruiting_status?: string;
   sort_by?: string;
   page?: number;
   page_size?: number;

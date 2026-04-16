@@ -220,11 +220,18 @@ async def get_review_queue(
     return result.scalars().all()
 
 
+_RECRUITING_NOW = ["RECRUITING"]
+_NOT_RECRUITING = ["NOT_YET_RECRUITING", "ACTIVE_NOT_RECRUITING", "ENROLLING_BY_INVITATION"]
+_FINISHED = ["COMPLETED", "TERMINATED", "WITHDRAWN", "SUSPENDED"]
+
+
 @router.get("/trials", response_model=TrialsListResponse)
 async def get_trials(
     status: Optional[TrialStatus] = None,
     q: Optional[str] = None,
     ingestion_event: Optional[IngestionEvent] = None,
+    phase: Optional[str] = None,
+    recruiting_status: Optional[str] = None,
     sort_by: Optional[str] = None,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
@@ -236,6 +243,8 @@ async def get_trials(
     - q: case-insensitive search across brief_title, brief_summary, eligibility_criteria
     - status: filter by PENDING_REVIEW / APPROVED / REJECTED
     - ingestion_event: filter by NEW / UPDATED
+    - phase: substring match on phase field (e.g. "PHASE1" matches "PHASE1" and "PHASE1_PHASE2")
+    - recruiting_status: "recruiting" | "not_recruiting" | "finished"
     - sort_by: "last_update_post_date" (default, desc) or "brief_title" (asc)
     - page / page_size: 1-based pagination
     """
@@ -245,6 +254,14 @@ async def get_trials(
         stmt = stmt.where(ClinicalTrial.status == status)
     if ingestion_event:
         stmt = stmt.where(ClinicalTrial.ingestion_event == ingestion_event)
+    if phase:
+        stmt = stmt.where(ClinicalTrial.phase.ilike(f"%{phase}%"))
+    if recruiting_status == "recruiting":
+        stmt = stmt.where(ClinicalTrial.overall_status.in_(_RECRUITING_NOW))
+    elif recruiting_status == "not_recruiting":
+        stmt = stmt.where(ClinicalTrial.overall_status.in_(_NOT_RECRUITING))
+    elif recruiting_status == "finished":
+        stmt = stmt.where(ClinicalTrial.overall_status.in_(_FINISHED))
     if q:
         stmt = stmt.where(
             or_(

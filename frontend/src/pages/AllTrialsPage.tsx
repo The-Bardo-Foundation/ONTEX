@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getTrials } from '../api';
 import type { GetTrialsParams } from '../api';
@@ -27,9 +27,69 @@ const SORT_OPTIONS = [
   { value: 'brief_title', label: 'Alphabetical' },
 ];
 
+const PHASE_OPTIONS = [
+  { value: 'PHASE1', label: 'Phase 1' },
+  { value: 'PHASE2', label: 'Phase 2' },
+  { value: 'PHASE3', label: 'Phase 3' },
+  { value: 'PHASE4', label: 'Phase 4' },
+];
+
+const RECRUITING_STATUS_OPTIONS = [
+  { value: 'recruiting', label: 'Recruiting now' },
+  { value: 'not_recruiting', label: 'Not currently recruiting' },
+  { value: 'finished', label: 'Finished trials' },
+];
+
+const ADMIN_PHASE_OPTIONS = [
+  { value: '', label: 'All phases' },
+  ...PHASE_OPTIONS,
+];
+
+const ADMIN_RECRUITING_OPTIONS = [
+  { value: '', label: 'All statuses' },
+  ...RECRUITING_STATUS_OPTIONS,
+];
+
 interface AllTrialsPageProps {
   /** Admin mode: shows all statuses and status filter. Default (public mode): APPROVED only. */
   adminMode?: boolean;
+}
+
+function FilterSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div>
+      <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">{title}</h3>
+      {children}
+    </div>
+  );
+}
+
+function RadioOption({
+  name,
+  value,
+  checked,
+  label,
+  onChange,
+}: {
+  name: string;
+  value: string;
+  checked: boolean;
+  label: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer py-0.5">
+      <input
+        type="radio"
+        name={name}
+        value={value}
+        checked={checked}
+        onChange={() => onChange(value)}
+        className="accent-blue-600"
+      />
+      {label}
+    </label>
+  );
 }
 
 export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
@@ -100,6 +160,26 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
               ))}
             </select>
           )}
+          {adminMode && (
+            <select
+              className="border border-gray-300 rounded px-3 py-1.5 text-sm"
+              onChange={(e) => setFilter('phase', e.target.value)}
+            >
+              {ADMIN_PHASE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          )}
+          {adminMode && (
+            <select
+              className="border border-gray-300 rounded px-3 py-1.5 text-sm"
+              onChange={(e) => setFilter('recruiting_status', e.target.value)}
+            >
+              {ADMIN_RECRUITING_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          )}
           <select
             className="border border-gray-300 rounded px-3 py-1.5 text-sm"
             defaultValue="last_update_post_date"
@@ -117,58 +197,124 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
         </div>
       </div>
 
-      {/* Trial list */}
-      <div className="flex-1 overflow-y-auto">
-        {!response ? (
-          <div className="flex items-center justify-center h-32">
-            <p className="text-sm text-gray-400">Loading…</p>
-          </div>
-        ) : response.items.length === 0 ? (
-          <div className="flex items-center justify-center h-32">
-            <p className="text-sm text-gray-400">No trials found.</p>
-          </div>
-        ) : (
-          <ul className="divide-y divide-gray-100">
-            {response.items.map((trial: TrialListItem) => {
-              const statusDisplay = getOverallStatusDisplay(trial.overall_status);
-              const summary = trial.custom_brief_summary || trial.brief_summary;
-              return (
-                <li
-                  key={trial.nct_id}
-                  onClick={() => navigate(`/trials/${trial.nct_id}`)}
-                  className="px-6 py-4 hover:bg-gray-50 cursor-pointer transition-colors"
+      {/* Content area: filter sidebar (public only) + trial list */}
+      <div className={`flex flex-1 overflow-hidden ${!adminMode ? 'flex-row' : 'flex-col'}`}>
+        {/* Filter sidebar — public mode only */}
+        {!adminMode && (
+          <aside className="w-52 shrink-0 border-r bg-gray-50 overflow-y-auto p-4 space-y-5">
+            <FilterSection title="Trial Phase">
+              <div className="space-y-1">
+                <RadioOption
+                  name="phase"
+                  value=""
+                  checked={!params.phase}
+                  label="All phases"
+                  onChange={() => setParams((p) => ({ ...p, phase: undefined, page: 1 }))}
+                />
+                {PHASE_OPTIONS.map((o) => (
+                  <RadioOption
+                    key={o.value}
+                    name="phase"
+                    value={o.value}
+                    checked={params.phase === o.value}
+                    label={o.label}
+                    onChange={(v) => setParams((p) => ({ ...p, phase: v, page: 1 }))}
+                  />
+                ))}
+              </div>
+            </FilterSection>
+
+            <div className="border-t border-gray-200" />
+
+            <FilterSection title="Recruiting Status">
+              <div className="space-y-1">
+                <RadioOption
+                  name="recruiting_status"
+                  value=""
+                  checked={!params.recruiting_status}
+                  label="All statuses"
+                  onChange={() => setParams((p) => ({ ...p, recruiting_status: undefined, page: 1 }))}
+                />
+                {RECRUITING_STATUS_OPTIONS.map((o) => (
+                  <RadioOption
+                    key={o.value}
+                    name="recruiting_status"
+                    value={o.value}
+                    checked={params.recruiting_status === o.value}
+                    label={o.label}
+                    onChange={(v) => setParams((p) => ({ ...p, recruiting_status: v, page: 1 }))}
+                  />
+                ))}
+              </div>
+            </FilterSection>
+
+            {(params.phase || params.recruiting_status) && (
+              <>
+                <div className="border-t border-gray-200" />
+                <button
+                  onClick={() => setParams((p) => ({ ...p, phase: undefined, recruiting_status: undefined, page: 1 }))}
+                  className="text-xs text-blue-600 hover:underline"
                 >
-                  <p className="text-sm font-semibold text-gray-900 leading-snug mb-1">
-                    {trial.brief_title}
-                  </p>
-                  {summary && (
-                    <p className="text-xs text-gray-500 leading-relaxed mb-2 line-clamp-2">
-                      {summary}
-                    </p>
-                  )}
-                  <div className="flex flex-wrap items-center gap-2">
-                    {trial.overall_status && (
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusDisplay.className}`}>
-                        {statusDisplay.label}
-                      </span>
-                    )}
-                    {trial.phase && (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">
-                        {formatPhase(trial.phase)}
-                      </span>
-                    )}
-                    {adminMode && <StatusBadge status={trial.status} />}
-                    {adminMode && trial.ingestion_event && <IngestionEventBadge event={trial.ingestion_event} />}
-                    <span className="text-xs text-gray-400 ml-auto">{trial.nct_id}</span>
-                    {trial.last_update_post_date && (
-                      <span className="text-xs text-gray-400">· Updated {trial.last_update_post_date}</span>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+                  Clear filters
+                </button>
+              </>
+            )}
+          </aside>
         )}
+
+        {/* Trial list */}
+        <div className="flex-1 overflow-y-auto">
+          {!response ? (
+            <div className="flex items-center justify-center h-32">
+              <p className="text-sm text-gray-400">Loading…</p>
+            </div>
+          ) : response.items.length === 0 ? (
+            <div className="flex items-center justify-center h-32">
+              <p className="text-sm text-gray-400">No trials found.</p>
+            </div>
+          ) : (
+            <ul className="divide-y divide-gray-100">
+              {response.items.map((trial: TrialListItem) => {
+                const statusDisplay = getOverallStatusDisplay(trial.overall_status);
+                const summary = trial.custom_brief_summary || trial.brief_summary;
+                return (
+                  <li
+                    key={trial.nct_id}
+                    onClick={() => navigate(`/trials/${trial.nct_id}`)}
+                    className="px-6 py-4 hover:bg-gray-50 cursor-pointer transition-colors"
+                  >
+                    <p className="text-sm font-semibold text-gray-900 leading-snug mb-1">
+                      {trial.brief_title}
+                    </p>
+                    {summary && (
+                      <p className="text-xs text-gray-500 leading-relaxed mb-2 line-clamp-2">
+                        {summary}
+                      </p>
+                    )}
+                    <div className="flex flex-wrap items-center gap-2">
+                      {trial.overall_status && (
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusDisplay.className}`}>
+                          {statusDisplay.label}
+                        </span>
+                      )}
+                      {trial.phase && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">
+                          {formatPhase(trial.phase)}
+                        </span>
+                      )}
+                      {adminMode && <StatusBadge status={trial.status} />}
+                      {adminMode && trial.ingestion_event && <IngestionEventBadge event={trial.ingestion_event} />}
+                      <span className="text-xs text-gray-400 ml-auto">{trial.nct_id}</span>
+                      {trial.last_update_post_date && (
+                        <span className="text-xs text-gray-400">· Updated {trial.last_update_post_date}</span>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
       </div>
 
       {/* Pagination */}
