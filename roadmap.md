@@ -35,7 +35,6 @@ The project has solid infrastructure in place, but the core ingestion pipeline i
 ### Not done (blocking)
 - Authentication and user management
 - Full trial detail API endpoint (`GET /api/v1/trials/{nct_id}`)
-- PHP template endpoint (`GET /api/v1/trail?trail_id={nct_id}`) — Phase 1.7
 - Admin review queue (new/updated trials)
 - Reviewer notes and audit log
 - Search and filtering in both API and frontend
@@ -45,7 +44,7 @@ The project has solid infrastructure in place, but the core ingestion pipeline i
 
 ## Phases
 
-### Phase 1 — Complete the ingestion pipeline ✅ (1.1–1.6 done)
+### Phase 1 — Complete the ingestion pipeline ✅
 
 This is the critical path. Nothing else matters until data flows end-to-end.
 
@@ -100,13 +99,13 @@ Create a new function `ai_generate_summaries(client, trial_data: dict) -> dict` 
 - `ingestion_runs` table added (migration 003): one row per run with all counts — queryable audit trail
 - Per-trial error handling: one bad trial does not abort the run; `fetch_errors` and `classify_errors` are tracked and written to `ingestion_runs`
 
-#### 1.7 Fix the PHP template API endpoint
+#### 1.7 Fix the PHP template API endpoint ✅
 
-The WordPress template `template-single-study.php` calls `/api/get-trail?trail_id={nct_id}` which does not exist in the codebase. Add this endpoint:
-
-- `GET /api/v1/trail?trail_id={nct_id}` (or update the PHP template to call the correct path)
-- Returns full trial data — all `custom_*` fields preferred, falling back to `official_*` fields if custom is null
-- This is the endpoint consumed by the live Osteosarcoma Now website
+- Added `GET /api/v1/trail?trail_id={nct_id}` to FastAPI (`app/api/endpoints.py`)
+- Returns full trial data in PascalCase JSON (`{ "result": [...] }`) matching what the PHP template expects — all fields are PascalCase except `key_information` which is snake_case (the PHP template reads it as `$customresult->key_information`)
+- Only returns `APPROVED` trials; returns 404 for missing or non-approved trials
+- Updated `templates/template-single-study.php` to call the new path; host is read from the `ONTEX_API_BASE` WordPress constant (set in `wp-config.php`) instead of hardcoded
+- 3 tests added to `tests/test_api.py` covering 404-missing, 404-non-approved, and 200-approved cases
 
 ---
 

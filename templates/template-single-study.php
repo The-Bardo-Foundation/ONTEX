@@ -5,7 +5,8 @@ if(isset($_REQUEST['id']) && $_REQUEST['id'] != ""){
 	//$search_query .= " AND AREA[NCTId]$nctid";
 	$search_query = "AREA[NCTId]$nctid";
 } 
-$urll = str_replace(" ","+","http://jayr57.sg-host.com/api/get-trail?trail_id=$nctid");
+$api_base = defined('ONTEX_API_BASE') ? ONTEX_API_BASE : 'https://<YOUR-RAILWAY-URL>';
+$urll = str_replace(" ","+","$api_base/api/v1/trail?trail_id=$nctid");
  // echo $urll;
 $curll = curl_init();
 curl_setopt_array($curll, array(
