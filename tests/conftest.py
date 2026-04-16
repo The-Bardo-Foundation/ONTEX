@@ -3,7 +3,21 @@ Pytest configuration and fixtures for test suite.
 """
 
 import asyncio
+import os
 import sys
+
+
+def pytest_configure(config):
+    """Set environment variables before any app module is imported.
+
+    database.py creates engine = create_async_engine(settings.DATABASE_URL)
+    at module level. This hook fires before collection imports test modules,
+    ensuring the singleton engine points to in-memory SQLite, not a real DB.
+    OPENAI_API_KEY must be a non-sentinel value so AIClient.__init__ doesn't raise.
+    """
+    os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+    os.environ.setdefault("OPENAI_API_KEY", "sk-test-not-real")
+    os.environ.setdefault("SKIP_MIGRATIONS", "1")
 from pathlib import Path
 from unittest.mock import AsyncMock
 
