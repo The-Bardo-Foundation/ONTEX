@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -213,8 +213,8 @@ async def get_trials(
     q: Optional[str] = None,
     ingestion_event: Optional[IngestionEvent] = None,
     sort_by: Optional[str] = None,
-    page: int = 1,
-    page_size: int = 20,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
     """

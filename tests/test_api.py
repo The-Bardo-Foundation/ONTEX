@@ -393,6 +393,18 @@ async def test_get_trials_pagination(test_client, db_engine):
 
 
 @pytest.mark.asyncio
+async def test_get_trials_rejects_invalid_page(test_client):
+    r = await test_client.get("/api/v1/trials?page=0")
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_get_trials_rejects_invalid_page_size(test_client):
+    r = await test_client.get("/api/v1/trials?page_size=101")
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_get_trials_search_q(test_client, db_engine):
     async with db_engine.begin() as conn:
         await conn.execute(
