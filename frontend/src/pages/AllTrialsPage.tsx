@@ -5,6 +5,7 @@ import type { GetTrialsParams } from '../api';
 import { IngestionEventBadge } from '../components/IngestionEventBadge';
 import { StatusBadge } from '../components/StatusBadge';
 import type { TrialListItem, TrialsListResponse } from '../types';
+import { formatPhase, getOverallStatusDisplay } from '../utils/formatters';
 
 const PAGE_SIZE = 20;
 
@@ -127,42 +128,40 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
             <p className="text-sm text-gray-400">No trials found.</p>
           </div>
         ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b sticky top-0">
-              <tr>
-                <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Title</th>
-                <th className="text-left px-3 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide w-24">Phase</th>
-                {adminMode && (
-                  <th className="text-left px-3 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide w-32">Status</th>
-                )}
-                {adminMode && (
-                  <th className="text-left px-3 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide w-24">Event</th>
-                )}
-                <th className="text-left px-3 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide w-28">Updated</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {response.items.map((trial: TrialListItem) => (
-                <tr
+          <ul className="divide-y divide-gray-100">
+            {response.items.map((trial: TrialListItem) => {
+              const statusDisplay = getOverallStatusDisplay(trial.overall_status);
+              return (
+                <li
                   key={trial.nct_id}
                   onClick={() => navigate(`/trials/${trial.nct_id}`)}
-                  className="hover:bg-gray-50 cursor-pointer"
+                  className="px-6 py-4 hover:bg-gray-50 cursor-pointer transition-colors"
                 >
-                  <td className="px-6 py-3 font-medium text-gray-900 max-w-xs truncate">
+                  <p className="text-sm font-semibold text-gray-900 leading-snug mb-2">
                     {trial.brief_title}
-                  </td>
-                  <td className="px-3 py-3 text-gray-500 text-xs">{trial.phase ?? '—'}</td>
-                  {adminMode && (
-                    <td className="px-3 py-3"><StatusBadge status={trial.status} /></td>
-                  )}
-                  {adminMode && (
-                    <td className="px-3 py-3"><IngestionEventBadge event={trial.ingestion_event} /></td>
-                  )}
-                  <td className="px-3 py-3 text-gray-400 text-xs">{trial.last_update_post_date ?? '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {trial.overall_status && (
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusDisplay.className}`}>
+                        {statusDisplay.label}
+                      </span>
+                    )}
+                    {trial.phase && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">
+                        {formatPhase(trial.phase)}
+                      </span>
+                    )}
+                    {adminMode && <StatusBadge status={trial.status} />}
+                    {adminMode && trial.ingestion_event && <IngestionEventBadge event={trial.ingestion_event} />}
+                    <span className="text-xs text-gray-400 ml-auto">{trial.nct_id}</span>
+                    {trial.last_update_post_date && (
+                      <span className="text-xs text-gray-400">· Updated {trial.last_update_post_date}</span>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
         )}
       </div>
 

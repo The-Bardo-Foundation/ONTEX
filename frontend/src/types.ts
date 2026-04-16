@@ -5,6 +5,7 @@ export interface TrialListItem {
   nct_id: string;
   brief_title: string;
   phase: string | null;
+  overall_status: string | null;
   status: TrialStatus;
   ingestion_event: IngestionEvent | null;
   last_update_post_date: string | null;
