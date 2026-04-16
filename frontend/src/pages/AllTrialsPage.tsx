@@ -56,6 +56,8 @@ const ADMIN_RECRUITING_OPTIONS = [
   ...RECRUITING_STATUS_OPTIONS,
 ];
 
+const SELECT_CLS = 'border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-700 bg-white shadow-sm cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition-colors hover:border-gray-300';
+
 interface AllTrialsPageProps {
   /** Admin mode: shows all statuses and status filter. Default (public mode): APPROVED only. */
   adminMode?: boolean;
@@ -98,12 +100,16 @@ function CountryCombobox({
   return (
     <div ref={containerRef} className="relative">
       <div
-        className={`flex items-center border rounded px-2 py-1.5 bg-white cursor-text ${open ? 'border-blue-400 ring-1 ring-blue-400' : 'border-gray-300'}`}
+        className={`flex items-center gap-1.5 border rounded-lg px-3 py-2 bg-white cursor-text shadow-sm transition-colors ${open ? 'border-blue-400 ring-2 ring-blue-100' : 'border-gray-200 hover:border-gray-300'}`}
         onClick={() => setOpen(true)}
       >
+        {/* search icon */}
+        <svg className="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+        </svg>
         <input
           type="text"
-          className="flex-1 text-sm outline-none bg-transparent min-w-0"
+          className="flex-1 text-sm outline-none bg-transparent min-w-0 text-gray-700 placeholder-gray-400"
           placeholder={value ?? 'All countries'}
           value={query}
           onFocus={() => setOpen(true)}
@@ -112,31 +118,33 @@ function CountryCombobox({
         {value && !open && (
           <button
             onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); select(undefined); }}
-            className="text-gray-400 hover:text-gray-600 ml-1 text-xs"
+            className="text-gray-300 hover:text-gray-500 transition-colors"
             aria-label="Clear country"
           >
-            ✕
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
           </button>
         )}
       </div>
       {open && (
-        <ul className="absolute z-10 left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-white border border-gray-200 rounded shadow-md text-sm">
+        <ul className="absolute z-10 left-0 right-0 mt-1.5 max-h-52 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg text-sm py-1">
           <li
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => select(undefined)}
-            className="px-3 py-1.5 cursor-pointer hover:bg-gray-50 text-gray-500 border-b border-gray-100"
+            className="px-3 py-2 cursor-pointer hover:bg-gray-50 text-gray-400 border-b border-gray-100 mb-1"
           >
             All countries
           </li>
           {filtered.length === 0 ? (
-            <li className="px-3 py-1.5 text-gray-400 italic">No results</li>
+            <li className="px-3 py-2 text-gray-400 italic">No results</li>
           ) : (
             filtered.map((c) => (
               <li
                 key={c}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => select(c)}
-                className={`px-3 py-1.5 cursor-pointer hover:bg-gray-50 ${c === value ? 'font-medium text-blue-600 bg-blue-50' : ''}`}
+                className={`px-3 py-2 cursor-pointer transition-colors ${c === value ? 'font-medium text-blue-600 bg-blue-50' : 'text-gray-700 hover:bg-gray-50'}`}
               >
                 {c}
               </li>
@@ -243,7 +251,7 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
         <div className="flex items-center gap-3 flex-wrap">
           {adminMode && (
             <select
-              className="border border-gray-300 rounded px-3 py-1.5 text-sm"
+              className={SELECT_CLS}
               onChange={(e) => setFilter('status', e.target.value)}
             >
               {STATUS_OPTIONS.map((o) => (
@@ -253,7 +261,7 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
           )}
           {adminMode && (
             <select
-              className="border border-gray-300 rounded px-3 py-1.5 text-sm"
+              className={SELECT_CLS}
               onChange={(e) => setFilter('ingestion_event', e.target.value)}
             >
               {EVENT_OPTIONS.map((o) => (
@@ -263,7 +271,7 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
           )}
           {adminMode && (
             <select
-              className="border border-gray-300 rounded px-3 py-1.5 text-sm"
+              className={SELECT_CLS}
               onChange={(e) => setFilter('phase', e.target.value)}
             >
               {ADMIN_PHASE_OPTIONS.map((o) => (
@@ -273,7 +281,7 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
           )}
           {adminMode && (
             <select
-              className="border border-gray-300 rounded px-3 py-1.5 text-sm"
+              className={SELECT_CLS}
               onChange={(e) => setFilter('recruiting_status', e.target.value)}
             >
               {ADMIN_RECRUITING_OPTIONS.map((o) => (
@@ -282,7 +290,7 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
             </select>
           )}
           <select
-            className="border border-gray-300 rounded px-3 py-1.5 text-sm"
+            className={SELECT_CLS}
             defaultValue="last_update_post_date"
             onChange={(e) => setFilter('sort_by', e.target.value)}
           >
@@ -390,7 +398,7 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
                 <div className="border-t border-gray-200" />
                 <button
                   onClick={() => setParams((p) => ({ ...p, phase: undefined, recruiting_status: undefined, age_group: undefined, country: undefined, page: 1 }))}
-                  className="text-xs text-blue-600 hover:underline"
+                  className="text-xs font-medium text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-full transition-colors"
                 >
                   Clear filters
                 </button>
@@ -460,17 +468,17 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
           <button
             disabled={params.page === 1}
             onClick={() => setParams((p) => ({ ...p, page: (p.page ?? 1) - 1 }))}
-            className="px-3 py-1.5 text-sm border rounded disabled:opacity-40 hover:bg-gray-50"
+            className="px-4 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg shadow-sm hover:bg-gray-50 hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             Previous
           </button>
-          <span className="text-sm text-gray-500">
+          <span className="text-sm text-gray-400">
             Page {params.page} of {totalPages}
           </span>
           <button
             disabled={params.page === totalPages}
             onClick={() => setParams((p) => ({ ...p, page: (p.page ?? 1) + 1 }))}
-            className="px-3 py-1.5 text-sm border rounded disabled:opacity-40 hover:bg-gray-50"
+            className="px-4 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg shadow-sm hover:bg-gray-50 hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             Next
           </button>
