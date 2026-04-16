@@ -18,7 +18,7 @@ const FIELDS: Field[] = [
 interface Props {
   trial: TrialDetail;
   edits: CustomEdits;
-  onChange: (field: keyof CustomEdits, value: string) => void;
+  onChange?: (field: keyof CustomEdits, value: string) => void;
 }
 
 export function OfficialVsCustomPanel({ trial, edits, onChange }: Props) {
@@ -35,21 +35,27 @@ export function OfficialVsCustomPanel({ trial, edits, onChange }: Props) {
               <div className="rounded border border-gray-200 bg-gray-50 p-2 text-xs text-gray-700 whitespace-pre-wrap min-h-[48px]">
                 {officialVal || <span className="text-gray-400 italic">Not provided</span>}
               </div>
-              {multiline ? (
-                <textarea
-                  className="rounded border border-gray-300 p-2 text-xs text-gray-900 resize-y min-h-[48px] focus:outline-none focus:ring-2 focus:ring-blue-400"
-                  value={customVal ?? ''}
-                  onChange={(e) => onChange(customKey, e.target.value)}
-                  placeholder="Edit custom value…"
-                />
+              {onChange ? (
+                multiline ? (
+                  <textarea
+                    className="rounded border border-gray-300 p-2 text-xs text-gray-900 resize-y min-h-[48px] focus:outline-none focus:ring-2 focus:ring-blue-400"
+                    value={customVal ?? ''}
+                    onChange={(e) => onChange(customKey, e.target.value)}
+                    placeholder="Edit custom value…"
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    className="rounded border border-gray-300 p-2 text-xs text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                    value={customVal ?? ''}
+                    onChange={(e) => onChange(customKey, e.target.value)}
+                    placeholder="Edit custom value…"
+                  />
+                )
               ) : (
-                <input
-                  type="text"
-                  className="rounded border border-gray-300 p-2 text-xs text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-400"
-                  value={customVal ?? ''}
-                  onChange={(e) => onChange(customKey, e.target.value)}
-                  placeholder="Edit custom value…"
-                />
+                <div className="rounded border border-gray-200 bg-gray-50 p-2 text-xs text-gray-700 whitespace-pre-wrap min-h-[48px]">
+                  {customVal || <span className="text-gray-400 italic">Not provided</span>}
+                </div>
               )}
             </div>
           </div>

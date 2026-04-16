@@ -84,7 +84,7 @@ export function TrialDetailView({ trial, onApprove, onReject }: Props) {
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Official (ClinicalTrials.gov)</p>
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Custom (AI / Admin)</p>
         </div>
-        <OfficialVsCustomPanel trial={trial} edits={edits} onChange={handleFieldChange} />
+        <OfficialVsCustomPanel trial={trial} edits={edits} onChange={showActions ? handleFieldChange : undefined} />
       </section>
 
       {/* Reviewer notes + action buttons */}
