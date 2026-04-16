@@ -38,7 +38,7 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.db.database import SessionLocal
-from app.db.models import ClinicalTrial, IngestionRun, IrrelevantTrial, TrialStatus
+from app.db.models import ClinicalTrial, IngestionEvent, IngestionRun, IrrelevantTrial, TrialStatus
 from app.services.ai.classifier import classify_trial
 from app.services.ai.client import AIClient
 from app.services.ai.summarizer import ai_generate_summaries
@@ -186,6 +186,14 @@ async def run_daily_ingestion(
     trials_with_existing_edits = set(updated_trials) | set(reeval_list)
     existing_custom_map: dict[str, dict] = {}  # nct_id → {field: non-null value}
     existing_approval_map: dict[str, dict] = {}  # nct_id → {approved_at, approved_by}
+    existing_snapshot_map: dict[str, dict] = {}  # nct_id → snapshot of official_* fields
+
+    _SNAPSHOT_FIELDS = [
+        "brief_title", "brief_summary", "overall_status", "phase", "study_type",
+        "location_country", "location_city", "minimum_age", "maximum_age",
+        "central_contact_name", "central_contact_phone", "central_contact_email",
+        "eligibility_criteria", "intervention_description", "last_update_post_date",
+    ]
 
     if trials_with_existing_edits:
         fetched_existing_ids = {
@@ -208,6 +216,12 @@ async def run_daily_ingestion(
                             existing_approval_map[row.nct_id] = {
                                 "approved_at": row.approved_at,
                                 "approved_by": row.approved_by,
+                            }
+                            # Snapshot the current official fields before the merge
+                            # overwrites them — used by the diff view in the review queue
+                            existing_snapshot_map[row.nct_id] = {
+                                field: getattr(row, field)
+                                for field in _SNAPSHOT_FIELDS
                             }
 
     # ──────────────────────────────────────────────────────────
@@ -234,6 +248,9 @@ async def run_daily_ingestion(
     newly_irrelevant = 0
     classify_errors = 0
 
+    # Used to set ingestion_event: updated_trials are UPDATED, everything else is NEW
+    updated_nct_ids = set(updated_trials)
+
     async with SessionLocal() as db:
         for trial_data in fetched:
             nct_id = trial_data.get("nct_id")
@@ -255,15 +272,19 @@ async def run_daily_ingestion(
 
             if classification.is_relevant:
                 approval_history = existing_approval_map.get(nct_id, {})
+                event = IngestionEvent.UPDATED if nct_id in updated_nct_ids else IngestionEvent.NEW
+                snapshot = existing_snapshot_map.get(nct_id)
                 trial = ClinicalTrial(
                     **trial_data,
                     status=TrialStatus.PENDING_REVIEW,
+                    ingestion_event=event,
                     ai_relevance_confidence=classification.confidence,
                     ai_relevance_reason=classification.reason,
                     ai_relevance_tier=classification.relevance_tier.value,
                     ai_matching_criteria=json.dumps(classification.matching_criteria),
                     previous_approved_at=approval_history.get("approved_at"),
                     previous_approved_by=approval_history.get("approved_by"),
+                    previous_official_snapshot=json.dumps(snapshot) if snapshot else None,
                 )
                 await db.merge(trial)
 

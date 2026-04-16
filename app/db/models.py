@@ -14,6 +14,11 @@ class TrialStatus(str, enum.Enum):
     REJECTED = "REJECTED"
 
 
+class IngestionEvent(str, enum.Enum):
+    NEW = "NEW"
+    UPDATED = "UPDATED"
+
+
 class ClinicalTrialBase:
     """Mixin with all clinical trial fields shared between relevant and irrelevant trials."""
 
@@ -93,6 +98,22 @@ class ClinicalTrial(ClinicalTrialBase, Base):
     # Previous approval — captured when an APPROVED trial is reset to PENDING_REVIEW
     previous_approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     previous_approved_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+    # Rejection tracking — set by PATCH /reject endpoint
+    rejected_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    rejected_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+    # Reviewer notes — free-text note left on approve or reject
+    reviewer_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Ingestion event — was this trial new or an update to a previously-approved one?
+    ingestion_event: Mapped[Optional[IngestionEvent]] = mapped_column(
+        Enum(IngestionEvent), nullable=True
+    )
+
+    # Snapshot of official_* fields at the moment an APPROVED trial was re-ingested.
+    # Stored as a JSON string; decoded at the application layer for the diff view.
+    previous_official_snapshot: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
 class IrrelevantTrial(ClinicalTrialBase, Base):
