@@ -131,15 +131,21 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
           <ul className="divide-y divide-gray-100">
             {response.items.map((trial: TrialListItem) => {
               const statusDisplay = getOverallStatusDisplay(trial.overall_status);
+              const summary = trial.custom_brief_summary || trial.brief_summary;
               return (
                 <li
                   key={trial.nct_id}
                   onClick={() => navigate(`/trials/${trial.nct_id}`)}
                   className="px-6 py-4 hover:bg-gray-50 cursor-pointer transition-colors"
                 >
-                  <p className="text-sm font-semibold text-gray-900 leading-snug mb-2">
+                  <p className="text-sm font-semibold text-gray-900 leading-snug mb-1">
                     {trial.brief_title}
                   </p>
+                  {summary && (
+                    <p className="text-xs text-gray-500 leading-relaxed mb-2 line-clamp-2">
+                      {summary}
+                    </p>
+                  )}
                   <div className="flex flex-wrap items-center gap-2">
                     {trial.overall_status && (
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusDisplay.className}`}>

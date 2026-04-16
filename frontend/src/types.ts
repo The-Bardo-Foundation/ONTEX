@@ -6,6 +6,8 @@ export interface TrialListItem {
   brief_title: string;
   phase: string | null;
   overall_status: string | null;
+  brief_summary: string | null;
+  custom_brief_summary: string | null;
   status: TrialStatus;
   ingestion_event: IngestionEvent | null;
   last_update_post_date: string | null;

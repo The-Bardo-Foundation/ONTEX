@@ -45,6 +45,8 @@ class TrialListItem(BaseModel):
     brief_title: str
     phase: Optional[str]
     overall_status: Optional[str]
+    brief_summary: Optional[str]
+    custom_brief_summary: Optional[str]
     status: TrialStatus
     ingestion_event: Optional[IngestionEvent]
     last_update_post_date: Optional[str]
