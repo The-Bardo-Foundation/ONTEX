@@ -102,7 +102,7 @@ Create a new function `ai_generate_summaries(client, trial_data: dict) -> dict` 
 #### 1.7 Fix the PHP template API endpoint ✅
 
 - Added `GET /api/v1/trail?trail_id={nct_id}` to FastAPI (`app/api/endpoints.py`)
-- Returns full trial data in PascalCase JSON (`{ "result": [...] }`) matching what the PHP template expects
+- Returns full trial data in PascalCase JSON (`{ "result": [...] }`) matching what the PHP template expects — all fields are PascalCase except `key_information` which is snake_case (the PHP template reads it as `$customresult->key_information`)
 - Only returns `APPROVED` trials; returns 404 for missing or non-approved trials
 - Updated `templates/template-single-study.php` to call the new path; host is read from the `ONTEX_API_BASE` WordPress constant (set in `wp-config.php`) instead of hardcoded
 - 3 tests added to `tests/test_api.py` covering 404-missing, 404-non-approved, and 200-approved cases
