@@ -303,23 +303,35 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
         {/* Filter sidebar — public mode only */}
         {!adminMode && (
           <aside className="w-52 shrink-0 border-r bg-gray-50 overflow-y-auto p-4 space-y-5">
-            <FilterSection title="Trial Phase">
+            {facets && facets.countries.length > 0 && (
+              <FilterSection title="Country">
+                <CountryCombobox
+                  countries={facets.countries}
+                  value={params.country}
+                  onChange={(c) => setParams((p) => ({ ...p, country: c, page: 1 }))}
+                />
+              </FilterSection>
+            )}
+
+            <div className="border-t border-gray-200" />
+
+            <FilterSection title="Age">
               <div className="space-y-1">
                 <RadioOption
-                  name="phase"
+                  name="age_group"
                   value=""
-                  checked={!params.phase}
-                  label="All phases"
-                  onChange={() => setParams((p) => ({ ...p, phase: undefined, page: 1 }))}
+                  checked={!params.age_group}
+                  label="All ages"
+                  onChange={() => setParams((p) => ({ ...p, age_group: undefined, page: 1 }))}
                 />
-                {PHASE_OPTIONS.map((o) => (
+                {AGE_GROUP_OPTIONS.map((o) => (
                   <RadioOption
                     key={o.value}
-                    name="phase"
+                    name="age_group"
                     value={o.value}
-                    checked={params.phase === o.value}
+                    checked={params.age_group === o.value}
                     label={o.label}
-                    onChange={(v) => setParams((p) => ({ ...p, phase: v, page: 1 }))}
+                    onChange={(v) => setParams((p) => ({ ...p, age_group: v, page: 1 }))}
                   />
                 ))}
               </div>
@@ -351,40 +363,27 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
 
             <div className="border-t border-gray-200" />
 
-            <FilterSection title="Age">
+            <FilterSection title="Trial Phase">
               <div className="space-y-1">
                 <RadioOption
-                  name="age_group"
+                  name="phase"
                   value=""
-                  checked={!params.age_group}
-                  label="All ages"
-                  onChange={() => setParams((p) => ({ ...p, age_group: undefined, page: 1 }))}
+                  checked={!params.phase}
+                  label="All phases"
+                  onChange={() => setParams((p) => ({ ...p, phase: undefined, page: 1 }))}
                 />
-                {AGE_GROUP_OPTIONS.map((o) => (
+                {PHASE_OPTIONS.map((o) => (
                   <RadioOption
                     key={o.value}
-                    name="age_group"
+                    name="phase"
                     value={o.value}
-                    checked={params.age_group === o.value}
+                    checked={params.phase === o.value}
                     label={o.label}
-                    onChange={(v) => setParams((p) => ({ ...p, age_group: v, page: 1 }))}
+                    onChange={(v) => setParams((p) => ({ ...p, phase: v, page: 1 }))}
                   />
                 ))}
               </div>
             </FilterSection>
-
-            {facets && facets.countries.length > 0 && (
-              <>
-                <div className="border-t border-gray-200" />
-                <FilterSection title="Country">
-                  <CountryCombobox
-                    countries={facets.countries}
-                    value={params.country}
-                    onChange={(c) => setParams((p) => ({ ...p, country: c, page: 1 }))}
-                  />
-                </FilterSection>
-              </>
-            )}
 
             {(params.phase || params.recruiting_status || params.age_group || params.country) && (
               <>
