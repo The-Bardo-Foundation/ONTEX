@@ -6,38 +6,36 @@
 
 ## Current State
 
-The project has solid infrastructure in place, but the core ingestion pipeline is not yet functional. Here is a summary of what is done and what is not:
+Phases 1–3 complete. The ingestion pipeline is fully operational, the test suite is comprehensive, and the admin dashboard has a proper review queue and trials library.
 
 ### Done
 - Database schema (`clinical_trials` and `irrelevant_trials` tables, dual-field `official` + `custom_*` pattern)
-- Alembic migrations (schema versioning)
+- Alembic migrations 001–004 (schema versioning through Phase 3)
 - ClinicalTrials.gov API v2 integration — trial index fetching (`study_index.py`) and trial detail fetching (`study_detail.py`)
 - LLM prompt templates for relevance classification and AI summarisation
 - OpenAI async client wrapper with retry logic and fail-safe behaviour
 - Relevance classifier (`classifier.py`) — fully wired, Pydantic v2, reads confidence threshold from config
 - AI summariser (`summarizer.py`) — generates patient-friendly `custom_*` fields; fail-safe on LLM error
-- **Full ingestion pipeline** (`ingestion.py`) — Steps 1–7 implemented end-to-end:
-  - Fetches NCT IDs, detects new/updated/rejected, fetches full study data,
-    generates AI summaries, classifies relevance, upserts to DB, re-evaluates
-    updated rejected trials, logs run summary
-- `config.py` extended with `SEARCH_TERMS`, `INGESTION_SCHEDULE_HOURS`, `AI_MODEL`, `CONFIDENCE_THRESHOLD`, `PAGE_SIZE`
-- `openai` added to `requirements.txt`
-- Migration `002_add_ai_classification_columns` — adds `ai_relevance_confidence`, `ai_relevance_reason`, `ai_relevance_tier`, `ai_matching_criteria` to `clinical_trials`
-- Migration `003_add_tracking_columns` — adds `approved_at`, `approved_by`, `previous_approved_at`, `previous_approved_by` to `clinical_trials`; adds `ingestion_runs` table
-- `ingestion_runs` table: one row per pipeline execution with counts (new/updated/reeval/errors) — queryable audit trail
-- `OPENAI_API_KEY` sentinel fix: `"Not Set"` default now correctly triggers RuntimeError in `AIClient`
-- FastAPI backend with `GET /api/v1/trials` and `PATCH /api/v1/trials/{nct_id}`
+- **Full ingestion pipeline** (`ingestion.py`) — Steps 1–7 implemented end-to-end, with `ingestion_event` (NEW/UPDATED) and `previous_official_snapshot` support
+- Migration `004_phase3_review_queue` — adds `ingestion_event`, `reviewer_notes`, `rejected_at/by`, `previous_official_snapshot`
+- FastAPI backend with full review queue API:
+  - `GET /api/v1/trials/review-queue` — pending trials with ingestion_event
+  - `GET /api/v1/trials/{nct_id}` — full trial detail
+  - `PATCH /api/v1/trials/{nct_id}/approve` — approve with notes and custom field edits
+  - `PATCH /api/v1/trials/{nct_id}/reject` — reject with notes
+  - `GET /api/v1/trials` — paginated list with search (`q=`), filters, sort
 - SQLAdmin panel for manual trial management
-- React frontend with sidebar, trial detail view, and approve/reject buttons
-- APScheduler running ingestion on configurable schedule (default 24 h), using `settings.SEARCH_TERMS`
+- **Admin frontend** (React + Tailwind + React Router v6):
+  - Review Queue page (`/`) — sidebar list with NEW/UPDATED badges, AI classification card, official vs custom field comparison, diff view for updated trials, approve/reject with notes
+  - All Trials page (`/trials`) — paginated table with search, status/event/sort filters
+  - Trial Detail page (`/trials/:nct_id`) — full detail with approve/reject for pending trials
+- 53 tests passing (API, ingestion pipeline, AI services)
+- APScheduler running ingestion on configurable schedule (default 24 h)
 - Development environment (Docker/SQLite), Railway deployment, GitHub Actions CI
 
-### Not done (blocking)
-- Authentication and user management
-- Full trial detail API endpoint (`GET /api/v1/trials/{nct_id}`)
-- Admin review queue (new/updated trials)
-- Reviewer notes and audit log
-- Search and filtering in both API and frontend
+### Not done
+- Authentication and user management (Phase 4)
+- `approved_by`/`rejected_by` currently hardcoded to `"admin"` — will be wired to auth in Phase 4
 
 ---
 
@@ -145,11 +143,11 @@ Create a new function `ai_generate_summaries(client, trial_data: dict) -> dict` 
 
 ---
 
-### Phase 3 — Admin dashboard: review queue
+### Phase 3 — Admin dashboard: review queue ✅
 
 The current frontend is a bare-bones prototype. This phase turns it into a proper admin tool for reviewing new and updated trials.
 
-#### 3.1 Database additions
+#### 3.1 Database additions ✅
 
 Add columns to `clinical_trials`:
 
@@ -168,7 +166,7 @@ Add columns to `clinical_trials`:
 | `rejected_by` | String | Username of the rejector |
 | `reviewer_notes` | Text | Optional free-text note from the reviewer |
 
-#### 3.2 API additions for the review queue
+#### 3.2 API additions for the review queue ✅
 
 - `GET /api/v1/trials/review-queue` — returns trials with `status=PENDING_REVIEW`, including `ingestion_event` (NEW / UPDATED)
 - `GET /api/v1/trials/{nct_id}` — returns full trial detail: all official and custom fields, AI classification metadata, reviewer notes, history
@@ -176,7 +174,7 @@ Add columns to `clinical_trials`:
 - `PATCH /api/v1/trials/{nct_id}/reject` — sets `status=REJECTED`, records `rejected_by`, `rejected_at`, optional `reviewer_notes`
 - `GET /api/v1/trials` — extend with search (`q=`), filter (`status=`, `ingestion_event=`, `phase=`, `location_country=`), and sort (`sort_by=last_update_post_date`)
 
-#### 3.3 Review queue frontend
+#### 3.3 Review queue frontend ✅
 
 Add a dedicated **Review Queue** page to the React frontend:
 
@@ -195,7 +193,7 @@ Add a dedicated **Review Queue** page to the React frontend:
 - A diff panel showing what changed since the last approved version (which fields have new values)
 - Previous approval context: who approved it, when, and what reviewer notes they wrote at the time
 
-#### 3.4 Trials library page
+#### 3.4 Trials library page ✅
 
 A separate **All Trials** page (existing Approved/Rejected tabs):
 - Search bar (full-text across title, summary, eligibility)

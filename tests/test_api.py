@@ -1,14 +1,11 @@
 import pytest
 
-from app.db.models import ClinicalTrial, TrialStatus
+from app.db.models import ClinicalTrial, IngestionEvent, TrialStatus
 
 
-@pytest.mark.asyncio
-async def test_get_trials_returns_list(test_client):
-    r = await test_client.get("/api/v1/trials")
-    assert r.status_code == 200
-    assert isinstance(r.json(), list)
-
+# ──────────────────────────────────────────────────────────
+# GET /trail (WordPress PHP endpoint)
+# ──────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_get_trail_returns_404_for_missing(test_client):
@@ -58,11 +55,19 @@ async def test_get_trail_returns_approved_trial(test_client, db_engine):
     assert trial["CentralContactEMail"] == "contact@example.com"
 
 
+# ──────────────────────────────────────────────────────────
+# GET /trials (paginated list)
+# ──────────────────────────────────────────────────────────
+
 @pytest.mark.asyncio
-async def test_get_trials_returns_empty_list_when_no_trials(test_client):
+async def test_get_trials_returns_paginated_response(test_client):
     r = await test_client.get("/api/v1/trials")
     assert r.status_code == 200
-    assert r.json() == []
+    body = r.json()
+    assert "items" in body
+    assert "total" in body
+    assert body["total"] == 0
+    assert body["items"] == []
 
 
 @pytest.mark.asyncio
@@ -82,9 +87,9 @@ async def test_get_trials_filters_by_status_approved(test_client, db_engine):
     r = await test_client.get("/api/v1/trials?status=APPROVED")
     assert r.status_code == 200
     body = r.json()
-    assert len(body) == 1
-    assert body[0]["nct_id"] == "NCT00000010"
-    assert body[0]["status"] == "APPROVED"
+    assert body["total"] == 1
+    assert body["items"][0]["nct_id"] == "NCT00000010"
+    assert body["items"][0]["status"] == "APPROVED"
 
 
 @pytest.mark.asyncio
@@ -104,10 +109,14 @@ async def test_get_trials_filters_by_status_pending_review(test_client, db_engin
     r = await test_client.get("/api/v1/trials?status=PENDING_REVIEW")
     assert r.status_code == 200
     body = r.json()
-    assert len(body) == 1
-    assert body[0]["nct_id"] == "NCT00000021"
-    assert body[0]["status"] == "PENDING_REVIEW"
+    assert body["total"] == 1
+    assert body["items"][0]["nct_id"] == "NCT00000021"
+    assert body["items"][0]["status"] == "PENDING_REVIEW"
 
+
+# ──────────────────────────────────────────────────────────
+# PATCH /trials/{nct_id} (backwards-compat endpoint)
+# ──────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_patch_trial_approve_transition(test_client, db_engine):
@@ -164,6 +173,10 @@ async def test_patch_trial_updates_custom_brief_summary(test_client, db_engine):
     assert body["custom_brief_summary"] == "Admin note."
 
 
+# ──────────────────────────────────────────────────────────
+# POST /debug/run-ingestion
+# ──────────────────────────────────────────────────────────
+
 @pytest.mark.asyncio
 async def test_debug_ingestion_endpoint(test_client, monkeypatch):
     called = {"called": False}
@@ -179,3 +192,286 @@ async def test_debug_ingestion_endpoint(test_client, monkeypatch):
     assert r.status_code == 200
     assert r.json().get("status") == "started"
     assert called["called"]
+
+
+# ──────────────────────────────────────────────────────────
+# GET /trials/review-queue
+# ──────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_get_review_queue_returns_pending_only(test_client, db_engine):
+    async with db_engine.begin() as conn:
+        await conn.execute(
+            ClinicalTrial.__table__.insert().values(
+                nct_id="NCT10000001", brief_title="Pending Trial", status=TrialStatus.PENDING_REVIEW
+            )
+        )
+        await conn.execute(
+            ClinicalTrial.__table__.insert().values(
+                nct_id="NCT10000002", brief_title="Approved Trial", status=TrialStatus.APPROVED
+            )
+        )
+
+    r = await test_client.get("/api/v1/trials/review-queue")
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body) == 1
+    assert body[0]["nct_id"] == "NCT10000001"
+    assert body[0]["status"] == "PENDING_REVIEW"
+
+
+@pytest.mark.asyncio
+async def test_get_review_queue_includes_ingestion_event(test_client, db_engine):
+    async with db_engine.begin() as conn:
+        await conn.execute(
+            ClinicalTrial.__table__.insert().values(
+                nct_id="NCT10000003",
+                brief_title="Updated Trial",
+                status=TrialStatus.PENDING_REVIEW,
+                ingestion_event=IngestionEvent.UPDATED,
+            )
+        )
+
+    r = await test_client.get("/api/v1/trials/review-queue")
+    assert r.status_code == 200
+    body = r.json()
+    assert body[0]["ingestion_event"] == "UPDATED"
+
+
+# ──────────────────────────────────────────────────────────
+# GET /trials/{nct_id}
+# ──────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_get_trial_detail_full_fields(test_client, db_engine):
+    async with db_engine.begin() as conn:
+        await conn.execute(
+            ClinicalTrial.__table__.insert().values(
+                nct_id="NCT10000010",
+                brief_title="Full Detail Trial",
+                brief_summary="Official summary.",
+                custom_brief_summary="Custom summary.",
+                phase="Phase 2",
+                ai_relevance_confidence=0.85,
+                ai_relevance_reason="Matches criteria.",
+                status=TrialStatus.PENDING_REVIEW,
+                ingestion_event=IngestionEvent.NEW,
+            )
+        )
+
+    r = await test_client.get("/api/v1/trials/NCT10000010")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["nct_id"] == "NCT10000010"
+    assert body["brief_title"] == "Full Detail Trial"
+    assert body["brief_summary"] == "Official summary."
+    assert body["custom_brief_summary"] == "Custom summary."
+    assert body["phase"] == "Phase 2"
+    assert body["ai_relevance_confidence"] == 0.85
+    assert body["ai_relevance_reason"] == "Matches criteria."
+    assert body["ingestion_event"] == "NEW"
+
+
+@pytest.mark.asyncio
+async def test_get_trial_detail_not_found(test_client):
+    r = await test_client.get("/api/v1/trials/NCT_FAKE_999")
+    assert r.status_code == 404
+
+
+# ──────────────────────────────────────────────────────────
+# PATCH /trials/{nct_id}/approve
+# ──────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_approve_sets_approved_at_and_by(test_client, db_engine):
+    async with db_engine.begin() as conn:
+        await conn.execute(
+            ClinicalTrial.__table__.insert().values(
+                nct_id="NCT10000020", brief_title="Trial A", status=TrialStatus.PENDING_REVIEW
+            )
+        )
+
+    r = await test_client.patch(
+        "/api/v1/trials/NCT10000020/approve",
+        json={"username": "dr_smith", "reviewer_notes": "Looks good."},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "APPROVED"
+    assert body["approved_by"] == "dr_smith"
+    assert body["approved_at"] is not None
+    assert body["reviewer_notes"] == "Looks good."
+
+
+@pytest.mark.asyncio
+async def test_approve_saves_custom_fields(test_client, db_engine):
+    async with db_engine.begin() as conn:
+        await conn.execute(
+            ClinicalTrial.__table__.insert().values(
+                nct_id="NCT10000021", brief_title="Trial B", status=TrialStatus.PENDING_REVIEW
+            )
+        )
+
+    r = await test_client.patch(
+        "/api/v1/trials/NCT10000021/approve",
+        json={"username": "admin", "custom_brief_summary": "Edited by reviewer."},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["custom_brief_summary"] == "Edited by reviewer."
+    assert body["status"] == "APPROVED"
+
+
+@pytest.mark.asyncio
+async def test_approve_not_found(test_client):
+    r = await test_client.patch(
+        "/api/v1/trials/NCT_MISSING/approve", json={"username": "admin"}
+    )
+    assert r.status_code == 404
+
+
+# ──────────────────────────────────────────────────────────
+# PATCH /trials/{nct_id}/reject
+# ──────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_reject_sets_rejected_at_and_by(test_client, db_engine):
+    async with db_engine.begin() as conn:
+        await conn.execute(
+            ClinicalTrial.__table__.insert().values(
+                nct_id="NCT10000030", brief_title="Trial C", status=TrialStatus.PENDING_REVIEW
+            )
+        )
+
+    r = await test_client.patch(
+        "/api/v1/trials/NCT10000030/reject",
+        json={"username": "dr_jones", "reviewer_notes": "Not relevant."},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "REJECTED"
+    assert body["rejected_by"] == "dr_jones"
+    assert body["rejected_at"] is not None
+    assert body["reviewer_notes"] == "Not relevant."
+
+
+@pytest.mark.asyncio
+async def test_reject_not_found(test_client):
+    r = await test_client.patch(
+        "/api/v1/trials/NCT_MISSING/reject", json={"username": "admin"}
+    )
+    assert r.status_code == 404
+
+
+# ──────────────────────────────────────────────────────────
+# GET /trials — search, filter, sort, pagination
+# ──────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_get_trials_pagination(test_client, db_engine):
+    async with db_engine.begin() as conn:
+        for i in range(25):
+            await conn.execute(
+                ClinicalTrial.__table__.insert().values(
+                    nct_id=f"NCT2000{i:04d}",
+                    brief_title=f"Trial {i}",
+                    status=TrialStatus.PENDING_REVIEW,
+                )
+            )
+
+    r1 = await test_client.get("/api/v1/trials?page=1&page_size=10")
+    assert r1.status_code == 200
+    body1 = r1.json()
+    assert body1["total"] == 25
+    assert len(body1["items"]) == 10
+    assert body1["page"] == 1
+
+    r3 = await test_client.get("/api/v1/trials?page=3&page_size=10")
+    assert r3.status_code == 200
+    body3 = r3.json()
+    assert len(body3["items"]) == 5
+
+
+@pytest.mark.asyncio
+async def test_get_trials_rejects_invalid_page(test_client):
+    r = await test_client.get("/api/v1/trials?page=0")
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_get_trials_rejects_invalid_page_size(test_client):
+    r = await test_client.get("/api/v1/trials?page_size=101")
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_get_trials_search_q(test_client, db_engine):
+    async with db_engine.begin() as conn:
+        await conn.execute(
+            ClinicalTrial.__table__.insert().values(
+                nct_id="NCT30000001",
+                brief_title="Osteosarcoma Phase II Study",
+                status=TrialStatus.APPROVED,
+            )
+        )
+        await conn.execute(
+            ClinicalTrial.__table__.insert().values(
+                nct_id="NCT30000002",
+                brief_title="Unrelated Diabetes Trial",
+                status=TrialStatus.APPROVED,
+            )
+        )
+
+    r = await test_client.get("/api/v1/trials?q=osteosarcoma")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] == 1
+    assert body["items"][0]["nct_id"] == "NCT30000001"
+
+
+@pytest.mark.asyncio
+async def test_get_trials_filter_ingestion_event(test_client, db_engine):
+    async with db_engine.begin() as conn:
+        await conn.execute(
+            ClinicalTrial.__table__.insert().values(
+                nct_id="NCT30000010",
+                brief_title="New Trial",
+                status=TrialStatus.PENDING_REVIEW,
+                ingestion_event=IngestionEvent.NEW,
+            )
+        )
+        await conn.execute(
+            ClinicalTrial.__table__.insert().values(
+                nct_id="NCT30000011",
+                brief_title="Updated Trial",
+                status=TrialStatus.PENDING_REVIEW,
+                ingestion_event=IngestionEvent.UPDATED,
+            )
+        )
+
+    r = await test_client.get("/api/v1/trials?ingestion_event=NEW")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] == 1
+    assert body["items"][0]["nct_id"] == "NCT30000010"
+
+
+@pytest.mark.asyncio
+async def test_get_trials_sort_brief_title(test_client, db_engine):
+    async with db_engine.begin() as conn:
+        await conn.execute(
+            ClinicalTrial.__table__.insert().values(
+                nct_id="NCT30000020", brief_title="Zebra Trial", status=TrialStatus.APPROVED
+            )
+        )
+        await conn.execute(
+            ClinicalTrial.__table__.insert().values(
+                nct_id="NCT30000021", brief_title="Alpha Trial", status=TrialStatus.APPROVED
+            )
+        )
+
+    r = await test_client.get("/api/v1/trials?sort_by=brief_title")
+    assert r.status_code == 200
+    items = r.json()["items"]
+    assert items[0]["brief_title"] == "Alpha Trial"
+    assert items[1]["brief_title"] == "Zebra Trial"

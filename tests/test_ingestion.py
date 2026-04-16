@@ -24,7 +24,7 @@ from sqlalchemy.orm import sessionmaker
 from unittest.mock import AsyncMock, MagicMock
 
 from app.db.database import Base
-from app.db.models import ClinicalTrial, IrrelevantTrial, TrialStatus
+from app.db.models import ClinicalTrial, IngestionEvent, IrrelevantTrial, TrialStatus
 from app.services.ai.schemas import ClassificationResult, RelevanceTier
 from app.services.ctgov.study_detail import map_api_to_model
 
@@ -730,3 +730,168 @@ def test_map_api_to_model_deduplicates_locations():
     assert countries.count("Norway") == 1
     cities = result["location_city"].split(", ")
     assert cities.count("Oslo") == 1
+
+
+# ─── ingestion_event and previous_official_snapshot tests ────────────────────
+
+@pytest.mark.asyncio
+async def test_new_trial_has_ingestion_event_new(tmp_path, monkeypatch):
+    """A brand-new trial should have ingestion_event=NEW after ingestion."""
+    engine, factory = _make_test_db(tmp_path, "test_event_new.db")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    trial_dict = make_trial_dict(nct_id="NCT_NEW_EVENT")
+
+    monkeypatch.setattr("app.services.ingestion.SessionLocal", factory)
+    monkeypatch.setattr(
+        "app.services.ingestion.iter_study_index_rows",
+        lambda **kwargs: [("NCT_NEW_EVENT", "2024-06-01")],
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.fetch_full_study",
+        lambda nct_id: {"protocolSection": {}},
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.map_api_to_model",
+        lambda raw: trial_dict.copy(),
+    )
+    monkeypatch.setattr("app.services.ingestion.AIClient", lambda: _make_mock_ai_client())
+    monkeypatch.setattr(
+        "app.services.ingestion.ai_generate_summaries",
+        AsyncMock(return_value=FAKE_AI_SUMMARIES),
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.classify_trial",
+        AsyncMock(return_value=make_classification(is_relevant=True)),
+    )
+
+    from app.services.ingestion import run_daily_ingestion
+    await run_daily_ingestion(search_terms=["osteosarcoma"])
+
+    async with factory() as db:
+        trial = await db.get(ClinicalTrial, "NCT_NEW_EVENT")
+        assert trial is not None
+        assert trial.ingestion_event == IngestionEvent.NEW
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_updated_trial_has_ingestion_event_updated(tmp_path, monkeypatch):
+    """A trial already in the DB with a new last_update_post_date should have
+    ingestion_event=UPDATED after re-ingestion."""
+    engine, factory = _make_test_db(tmp_path, "test_event_updated.db")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    # Pre-populate trial with an old date
+    async with factory() as db:
+        existing = ClinicalTrial(
+            nct_id="NCT_UPD_EVENT",
+            brief_title="Old Title",
+            last_update_post_date="2024-01-01",
+            status=TrialStatus.PENDING_REVIEW,
+        )
+        db.add(existing)
+        await db.commit()
+
+    trial_dict = make_trial_dict(nct_id="NCT_UPD_EVENT", last_update="2024-12-01")
+
+    monkeypatch.setattr("app.services.ingestion.SessionLocal", factory)
+    monkeypatch.setattr(
+        "app.services.ingestion.iter_study_index_rows",
+        lambda **kwargs: [("NCT_UPD_EVENT", "2024-12-01")],
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.fetch_full_study",
+        lambda nct_id: {"protocolSection": {}},
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.map_api_to_model",
+        lambda raw: trial_dict.copy(),
+    )
+    monkeypatch.setattr("app.services.ingestion.AIClient", lambda: _make_mock_ai_client())
+    monkeypatch.setattr(
+        "app.services.ingestion.ai_generate_summaries",
+        AsyncMock(return_value=FAKE_AI_SUMMARIES),
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.classify_trial",
+        AsyncMock(return_value=make_classification(is_relevant=True)),
+    )
+
+    from app.services.ingestion import run_daily_ingestion
+    await run_daily_ingestion(search_terms=["osteosarcoma"])
+
+    async with factory() as db:
+        trial = await db.get(ClinicalTrial, "NCT_UPD_EVENT")
+        assert trial is not None
+        assert trial.ingestion_event == IngestionEvent.UPDATED
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_approved_trial_update_saves_previous_official_snapshot(tmp_path, monkeypatch):
+    """When an APPROVED trial is re-ingested with a new date, previous_official_snapshot
+    should contain the official fields as they were before the re-ingestion."""
+    engine, factory = _make_test_db(tmp_path, "test_snapshot.db")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    old_summary = "The original brief summary from ClinicalTrials.gov"
+
+    async with factory() as db:
+        existing = ClinicalTrial(
+            nct_id="NCT_SNAP",
+            brief_title="Snapshot Trial",
+            brief_summary=old_summary,
+            last_update_post_date="2024-01-01",
+            status=TrialStatus.APPROVED,
+            approved_at=__import__("datetime").datetime(2024, 3, 1),
+            approved_by="admin",
+        )
+        db.add(existing)
+        await db.commit()
+
+    trial_dict = make_trial_dict(nct_id="NCT_SNAP", last_update="2024-12-01")
+    trial_dict["brief_summary"] = "Updated summary from ClinicalTrials.gov"
+
+    monkeypatch.setattr("app.services.ingestion.SessionLocal", factory)
+    monkeypatch.setattr(
+        "app.services.ingestion.iter_study_index_rows",
+        lambda **kwargs: [("NCT_SNAP", "2024-12-01")],
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.fetch_full_study",
+        lambda nct_id: {"protocolSection": {}},
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.map_api_to_model",
+        lambda raw: trial_dict.copy(),
+    )
+    monkeypatch.setattr("app.services.ingestion.AIClient", lambda: _make_mock_ai_client())
+    monkeypatch.setattr(
+        "app.services.ingestion.ai_generate_summaries",
+        AsyncMock(return_value=FAKE_AI_SUMMARIES),
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.classify_trial",
+        AsyncMock(return_value=make_classification(is_relevant=True)),
+    )
+
+    from app.services.ingestion import run_daily_ingestion
+    await run_daily_ingestion(search_terms=["osteosarcoma"])
+
+    async with factory() as db:
+        trial = await db.get(ClinicalTrial, "NCT_SNAP")
+        assert trial is not None
+        assert trial.previous_official_snapshot is not None
+        snapshot = json.loads(trial.previous_official_snapshot)
+        # Snapshot should contain the OLD brief_summary, not the new one
+        assert snapshot["brief_summary"] == old_summary
+        # Current brief_summary should be the new value
+        assert trial.brief_summary == "Updated summary from ClinicalTrials.gov"
+
+    await engine.dispose()
