@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getTrials } from '../api';
-import type { GetTrialsParams } from '../api';
+import { getTrialFacets, getTrials } from '../api';
+import type { GetTrialsParams, TrialFacets } from '../api';
 import { IngestionEventBadge } from '../components/IngestionEventBadge';
 import { StatusBadge } from '../components/StatusBadge';
 import type { TrialListItem, TrialsListResponse } from '../types';
@@ -38,6 +38,12 @@ const RECRUITING_STATUS_OPTIONS = [
   { value: 'recruiting', label: 'Recruiting now' },
   { value: 'not_recruiting', label: 'Not currently recruiting' },
   { value: 'finished', label: 'Finished trials' },
+];
+
+const AGE_GROUP_OPTIONS = [
+  { value: 'child', label: 'Child (Under 18)' },
+  { value: 'adult', label: 'Adult (18–64)' },
+  { value: 'older_adult', label: 'Older Adult (65+)' },
 ];
 
 const ADMIN_PHASE_OPTIONS = [
@@ -95,6 +101,7 @@ function RadioOption({
 export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
   const navigate = useNavigate();
   const [response, setResponse] = useState<TrialsListResponse | null>(null);
+  const [facets, setFacets] = useState<TrialFacets | null>(null);
   const [params, setParams] = useState<GetTrialsParams>(() => ({
     page: 1,
     page_size: PAGE_SIZE,
@@ -104,6 +111,13 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
   }));
   const [searchInput, setSearchInput] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Fetch facets once for filter dropdowns (public mode only)
+  useEffect(() => {
+    if (!adminMode) {
+      getTrialFacets().then(setFacets).catch(console.error);
+    }
+  }, [adminMode]);
 
   // Fetch whenever params change
   useEffect(() => {
@@ -248,11 +262,53 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
               </div>
             </FilterSection>
 
-            {(params.phase || params.recruiting_status) && (
+            <div className="border-t border-gray-200" />
+
+            <FilterSection title="Age">
+              <div className="space-y-1">
+                <RadioOption
+                  name="age_group"
+                  value=""
+                  checked={!params.age_group}
+                  label="All ages"
+                  onChange={() => setParams((p) => ({ ...p, age_group: undefined, page: 1 }))}
+                />
+                {AGE_GROUP_OPTIONS.map((o) => (
+                  <RadioOption
+                    key={o.value}
+                    name="age_group"
+                    value={o.value}
+                    checked={params.age_group === o.value}
+                    label={o.label}
+                    onChange={(v) => setParams((p) => ({ ...p, age_group: v, page: 1 }))}
+                  />
+                ))}
+              </div>
+            </FilterSection>
+
+            {facets && facets.countries.length > 0 && (
+              <>
+                <div className="border-t border-gray-200" />
+                <FilterSection title="Country">
+                  <select
+                    className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm bg-white"
+                    value={params.country ?? ''}
+                    onChange={(e) => setParams((p) => ({ ...p, country: e.target.value || undefined, page: 1 }))}
+                  >
+                    <option value="">All countries</option>
+                    {facets.countries.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </FilterSection>
+              </>
+            )}
+
+            {(params.phase || params.recruiting_status || params.age_group || params.country) && (
               <>
                 <div className="border-t border-gray-200" />
                 <button
-                  onClick={() => setParams((p) => ({ ...p, phase: undefined, recruiting_status: undefined, page: 1 }))}
+                  onClick={() => setParams((p) => ({ ...p, phase: undefined, recruiting_status: undefined, age_group: undefined, country: undefined, page: 1 }))}
                   className="text-xs text-blue-600 hover:underline"
                 >
                   Clear filters

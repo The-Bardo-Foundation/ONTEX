@@ -38,9 +38,15 @@ export interface GetTrialsParams {
   ingestion_event?: string;
   phase?: string;
   recruiting_status?: string;
+  country?: string;
+  age_group?: string;
   sort_by?: string;
   page?: number;
   page_size?: number;
+}
+
+export interface TrialFacets {
+  countries: string[];
 }
 
 export const getReviewQueue = async (): Promise<TrialListItem[]> => {
@@ -55,6 +61,11 @@ export const getTrial = async (nct_id: string): Promise<TrialDetail> => {
 
 export const getTrials = async (params: GetTrialsParams = {}): Promise<TrialsListResponse> => {
   const response = await api.get<TrialsListResponse>('/trials', { params });
+  return response.data;
+};
+
+export const getTrialFacets = async (): Promise<TrialFacets> => {
+  const response = await api.get<TrialFacets>('/trials/facets');
   return response.data;
 };
 

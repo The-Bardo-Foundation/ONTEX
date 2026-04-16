@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 from datetime import datetime
 from typing import AsyncGenerator, List, Optional
 
@@ -205,6 +206,39 @@ class PhpTrialResponse(BaseModel):
 # so FastAPI does not match the literal "review-queue" as a path parameter.
 # ──────────────────────────────────────────────────────────────────────────────
 
+class TrialFacets(BaseModel):
+    countries: List[str]
+
+
+@router.get("/trials/facets", response_model=TrialFacets)
+async def get_trial_facets(db: AsyncSession = Depends(get_db)):
+    """
+    Return distinct filterable values from approved trials.
+
+    - countries: sorted list of individual country names (split from comma-joined location_country)
+    """
+    stmt = (
+        select(ClinicalTrial.location_country)
+        .where(
+            ClinicalTrial.status == TrialStatus.APPROVED,
+            ClinicalTrial.location_country.isnot(None),
+        )
+        .distinct()
+    )
+    result = await db.execute(stmt)
+    raw_countries = [row[0] for row in result.fetchall()]
+
+    # location_country may be comma-joined (e.g. "United States, Norway")
+    unique: set[str] = set()
+    for entry in raw_countries:
+        for country in entry.split(","):
+            country = country.strip()
+            if country:
+                unique.add(country)
+
+    return TrialFacets(countries=sorted(unique))
+
+
 @router.get("/trials/review-queue", response_model=List[TrialListItem])
 async def get_review_queue(
     _user: dict = Depends(clerk_user),
@@ -224,6 +258,41 @@ _RECRUITING_NOW = ["RECRUITING"]
 _NOT_RECRUITING = ["NOT_YET_RECRUITING", "ACTIVE_NOT_RECRUITING", "ENROLLING_BY_INVITATION"]
 _FINISHED = ["COMPLETED", "TERMINATED", "WITHDRAWN", "SUSPENDED"]
 
+# ── Age filtering helpers ──────────────────────────────────────────────────────
+# minimum_age / maximum_age are free-text strings from ClinicalTrials.gov,
+# e.g. "18 Years", "6 Months", "N/A". We parse them in Python because SQLite
+# cannot reliably extract numbers from arbitrary strings.
+
+def _parse_age_years(age_str: Optional[str]) -> Optional[float]:
+    """Return age in years, or None if unknown / N/A (meaning no restriction)."""
+    if not age_str or age_str.strip().upper() in ("N/A", ""):
+        return None
+    m = re.match(r"(\d+(?:\.\d+)?)\s*(year|month|week|day)", age_str.strip(), re.IGNORECASE)
+    if not m:
+        return None
+    value = float(m.group(1))
+    unit = m.group(2).lower()
+    if unit.startswith("month"):
+        value /= 12
+    elif unit.startswith("week"):
+        value /= 52
+    elif unit.startswith("day"):
+        value /= 365
+    return value
+
+
+def _matches_age_group(trial: "ClinicalTrial", age_group: str) -> bool:
+    """Return True if a person in the given age group is eligible for this trial."""
+    min_age = _parse_age_years(trial.minimum_age)   # None = no lower bound
+    max_age = _parse_age_years(trial.maximum_age)   # None = no upper bound
+    if age_group == "child":        # under-18 eligible
+        return (min_age is None or min_age < 18) and (max_age is None or max_age >= 1)
+    if age_group == "adult":        # 18–64 eligible
+        return (min_age is None or min_age <= 64) and (max_age is None or max_age >= 18)
+    if age_group == "older_adult":  # 65+ eligible
+        return (min_age is None or min_age <= 65) and (max_age is None or max_age >= 65)
+    return True
+
 
 @router.get("/trials", response_model=TrialsListResponse)
 async def get_trials(
@@ -232,6 +301,8 @@ async def get_trials(
     ingestion_event: Optional[IngestionEvent] = None,
     phase: Optional[str] = None,
     recruiting_status: Optional[str] = None,
+    country: Optional[str] = None,
+    age_group: Optional[str] = None,
     sort_by: Optional[str] = None,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
@@ -245,6 +316,8 @@ async def get_trials(
     - ingestion_event: filter by NEW / UPDATED
     - phase: substring match on phase field (e.g. "PHASE1" matches "PHASE1" and "PHASE1_PHASE2")
     - recruiting_status: "recruiting" | "not_recruiting" | "finished"
+    - country: substring match on location_country (handles comma-joined multi-country values)
+    - age_group: "child" | "adult" | "older_adult" — Python-side filter (age strings can't be compared in SQL)
     - sort_by: "last_update_post_date" (default, desc) or "brief_title" (asc)
     - page / page_size: 1-based pagination
     """
@@ -262,6 +335,8 @@ async def get_trials(
         stmt = stmt.where(ClinicalTrial.overall_status.in_(_NOT_RECRUITING))
     elif recruiting_status == "finished":
         stmt = stmt.where(ClinicalTrial.overall_status.in_(_FINISHED))
+    if country:
+        stmt = stmt.where(ClinicalTrial.location_country.ilike(f"%{country}%"))
     if q:
         stmt = stmt.where(
             or_(
@@ -271,21 +346,26 @@ async def get_trials(
             )
         )
 
-    # Count total before pagination
-    count_stmt = select(func.count()).select_from(stmt.subquery())
-    total = await db.scalar(count_stmt)
-
     # Sort
     if sort_by == "brief_title":
         stmt = stmt.order_by(ClinicalTrial.brief_title.asc())
     else:
         stmt = stmt.order_by(ClinicalTrial.last_update_post_date.desc())
 
-    # Paginate
-    stmt = stmt.offset((page - 1) * page_size).limit(page_size)
-
-    result = await db.execute(stmt)
-    items = result.scalars().all()
+    if age_group:
+        # Age strings can't be compared reliably in SQL — fetch all matches and
+        # filter + paginate in Python. Fine for the small trial sets we have.
+        result = await db.execute(stmt)
+        all_items = [t for t in result.scalars().all() if _matches_age_group(t, age_group)]
+        total = len(all_items)
+        items = all_items[(page - 1) * page_size : page * page_size]
+    else:
+        # Standard DB-level count + paginate
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        total = await db.scalar(count_stmt)
+        stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+        result = await db.execute(stmt)
+        items = result.scalars().all()
 
     return TrialsListResponse(items=items, total=total or 0, page=page, page_size=page_size)
 
