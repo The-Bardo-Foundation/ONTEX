@@ -1,14 +1,16 @@
 """
 Pytest configuration and fixtures for test suite.
-Handles proper cleanup of resources like database connections and event loops.
 """
 
 import asyncio
 import sys
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
+from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 # Ensure repository root is on sys.path so `import app` works in CI
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -16,32 +18,49 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 @pytest.fixture(scope="session", autouse=True)
 def event_loop():
-    """
-    Create a single event loop for the entire test session.
-    This prevents event loop issues and ensures proper cleanup.
-    """
+    """Single event loop for the entire test session."""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     yield loop
     loop.close()
 
 
-@pytest_asyncio.fixture(autouse=True)
-async def cleanup_engines():
+@pytest_asyncio.fixture
+async def db_engine(tmp_path):
+    """A fresh SQLite engine with all tables created, scoped to one test."""
+    from app.db.database import Base
+
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path}/test.db")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield engine
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def test_client(db_engine, monkeypatch):
     """
-    Fixture that automatically runs after each test to ensure
-    all SQLAlchemy engines are properly disposed.
+    AsyncClient wired to a fresh per-test SQLite DB via get_db dependency override.
 
-    This prevents the Python process from hanging due to unclosed
-    database connections waiting for cleanup.
+    Ingestion is patched to a no-op so tests don't hit the external API.
+    Individual tests may re-patch run_daily_ingestion after receiving this fixture
+    if they need to inspect calls (monkeypatch.setattr overwrites the noop).
     """
-    yield
+    import app.services.ingestion as ingestion
 
-    # After test completes, dispose all engines
-    # Import here to avoid issues if test hasn't imported the db module
-    try:
-        from app.db.database import engine
+    monkeypatch.setattr(ingestion, "run_daily_ingestion", AsyncMock(return_value=None))
+    monkeypatch.setenv("SKIP_MIGRATIONS", "1")
 
-        await engine.dispose()
-    except Exception as e:
-        print(f"Warning: Error disposing engine in cleanup: {e}")
+    from app.db.database import get_db
+    from app.main import app
+
+    async def override_get_db():
+        async with AsyncSession(db_engine) as session:
+            yield session
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    async with AsyncClient(app=app, base_url="http://test") as client:
+        yield client
+
+    app.dependency_overrides.clear()
