@@ -1,5 +1,7 @@
 import os
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 def get_env_file() -> str:
     """Determine which .env file to load based on environment"""
@@ -18,10 +20,16 @@ class Settings(BaseSettings):
     ADMIN_PASSWORD: str = "password"
     ENVIRONMENT: str = "local"  # local, staging, production
 
+    # Ingestion pipeline settings
+    # SEARCH_TERMS can be overridden via env var as JSON: SEARCH_TERMS='["osteosarcoma","bone sarcoma"]'
+    SEARCH_TERMS: list[str] = ["osteosarcoma"]
+    INGESTION_SCHEDULE_HOURS: int = 24
+    AI_MODEL: str = "gpt-4o-mini"
+    CONFIDENCE_THRESHOLD: float = 0.7
+    PAGE_SIZE: int = 100
+
     model_config = SettingsConfigDict(
-        env_file=get_env_file(),
-        env_ignore_empty=True,
-        extra="ignore"
+        env_file=get_env_file(), env_ignore_empty=True, extra="ignore"
     )
 
 
@@ -40,4 +48,3 @@ if settings.DATABASE_URL.startswith("http"):
         "'sqlite+aiosqlite:///./ontex.db'",
         file=sys.stderr,
     )
-

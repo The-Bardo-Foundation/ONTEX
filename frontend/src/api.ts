@@ -1,33 +1,49 @@
 import axios from 'axios';
+import type {
+  ApproveBody,
+  RejectBody,
+  TrialDetail,
+  TrialListItem,
+  TrialsListResponse,
+} from './types';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
-
-export interface Trial {
-  id: number;
-  nct_id: string;
-  title: string;
-  official_summary: string;
-  custom_summary: string | null;
-  status: 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED';
-  last_updated: string;
-}
 
 export const api = axios.create({
   baseURL: API_URL,
 });
 
-export const getTrials = async (status: string = 'PENDING_REVIEW'): Promise<Trial[]> => {
-  const response = await api.get<Trial[]>('/trials', {
-    params: { status },
-  });
+export interface GetTrialsParams {
+  status?: string;
+  q?: string;
+  ingestion_event?: string;
+  sort_by?: string;
+  page?: number;
+  page_size?: number;
+}
+
+export const getReviewQueue = async (): Promise<TrialListItem[]> => {
+  const response = await api.get<TrialListItem[]>('/trials/review-queue');
   return response.data;
 };
 
-export const updateTrial = async (
-  nct_id: string,
-  data: { status: string; custom_summary?: string }
-): Promise<Trial> => {
-  const response = await api.patch<Trial>(`/trials/${nct_id}`, data);
+export const getTrial = async (nct_id: string): Promise<TrialDetail> => {
+  const response = await api.get<TrialDetail>(`/trials/${nct_id}`);
+  return response.data;
+};
+
+export const getTrials = async (params: GetTrialsParams = {}): Promise<TrialsListResponse> => {
+  const response = await api.get<TrialsListResponse>('/trials', { params });
+  return response.data;
+};
+
+export const approveTrial = async (nct_id: string, body: ApproveBody): Promise<TrialDetail> => {
+  const response = await api.patch<TrialDetail>(`/trials/${nct_id}/approve`, body);
+  return response.data;
+};
+
+export const rejectTrial = async (nct_id: string, body: RejectBody): Promise<TrialDetail> => {
+  const response = await api.patch<TrialDetail>(`/trials/${nct_id}/reject`, body);
   return response.data;
 };
 
@@ -35,4 +51,3 @@ export const runIngestion = async (): Promise<{ status: string }> => {
   const response = await api.post<{ status: string }>('/debug/run-ingestion');
   return response.data;
 };
-

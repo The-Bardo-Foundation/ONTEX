@@ -6,6 +6,7 @@ asyncpg
 alembic
 sqladmin
 apscheduler
+openai
 python-multipart
 python-jose[cryptography]
 passlib[bcrypt]
@@ -16,3 +17,5 @@ aiosqlite
 httpx==0.23.3
 pytest-asyncio>=0.23.0
 psycopg2-binary
+pre-commit
+pytest

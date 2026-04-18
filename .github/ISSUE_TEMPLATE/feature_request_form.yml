@@ -1,0 +1,69 @@
+name: Feature request
+description: Suggest an improvement or new capability for ACTE.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please describe the user need and the smallest viable solution.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Backend API (FastAPI)
+        - Data ingestion pipeline
+        - Database / migrations (Alembic)
+        - Frontend (Vite/React)
+        - Deployment / Docker
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What problem are you trying to solve? Who benefits?
+      placeholder: "As a ..., I want ..., so that ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the solution you’d like to see.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any alternative approaches or workarounds?
+    validations:
+      required: false
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Out of scope
+      description: Explicitly note what this request should NOT include.
+      placeholder: "Not doing X / not changing Y / not adding Z"
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues to avoid duplicates.
+          required: true
+        - label: This request does not include any sensitive data (PHI/PII).
+          required: true

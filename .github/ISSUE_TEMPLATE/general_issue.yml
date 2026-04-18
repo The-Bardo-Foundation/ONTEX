@@ -1,0 +1,60 @@
+name: General issue
+description: A catch-all issue for anything that is not a bug report or feature request.
+title: "[General]: "
+labels:
+  - triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for general tasks, refactors, questions that require investigation, or anything that doesn’t fit the Bug/Feature templates.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Backend API (FastAPI)
+        - Data ingestion pipeline
+        - Database / migrations (Alembic)
+        - Frontend (Vite/React)
+        - Deployment / Docker
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What needs doing? Include context and desired outcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: How do we know this is done?
+      placeholder: |
+        - ...
+        - ...
+    validations:
+      required: false
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes / links
+      description: Link related issues/PRs/docs. Redact secrets.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I removed or redacted any secrets (API keys, tokens, PHI/PII).
+          required: true

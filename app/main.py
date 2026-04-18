@@ -1,26 +1,26 @@
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from fastapi.middleware.cors import CORSMiddleware
-from sqladmin import Admin
-from sqlalchemy.ext.asyncio import AsyncSession
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from alembic.config import Config
-from pathlib import Path
-from alembic import command
-import os
 import asyncio
+import os
+from contextlib import asynccontextmanager
+from pathlib import Path
 
-from app.core.config import settings
-from app.db.database import engine, Base, get_db
-from app.db.models import ClinicalTrial, TrialStatus
+from alembic.config import Config
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from sqladmin import Admin
+
+from alembic import command
 from app.admin.views import ClinicalTrialAdmin
 from app.api.endpoints import router as api_router
+from app.core.config import settings
+from app.db.database import Base, engine
 from app.services.ingestion import run_daily_ingestion
 
 # Initialize Scheduler
 scheduler = AsyncIOScheduler()
+
 
 async def run_migrations():
     """Run Alembic migrations or create tables for local sqlite on startup.
@@ -40,7 +40,9 @@ async def run_migrations():
     db_url = settings.DATABASE_URL or ""
 
     if os.getenv("SKIP_MIGRATIONS", "0") == "1":
-        print("run_migrations: SKIP_MIGRATIONS=1 set, skipping automatic alembic upgrade")
+        print(
+            "run_migrations: SKIP_MIGRATIONS=1 set, skipping automatic alembic upgrade"
+        )
         return
 
     # If using async sqlite, create metadata tables via async engine
@@ -75,6 +77,7 @@ async def run_migrations():
         print("run_migrations: alembic upgrade failed")
         raise
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Trace: help diagnose startup hangs
@@ -84,18 +87,25 @@ async def lifespan(app: FastAPI):
         print("startup: run_migrations() completed")
     except Exception as e:
         import traceback
+
         print("startup: run_migrations() raised:", e)
         traceback.print_exc()
         raise
 
     print("startup: scheduling ingestion job")
     try:
-        scheduler.add_job(run_daily_ingestion, 'interval', hours=24)
+        scheduler.add_job(
+            run_daily_ingestion,
+            "interval",
+            hours=settings.INGESTION_SCHEDULE_HOURS,
+            kwargs={"search_terms": settings.SEARCH_TERMS},
+        )
         print("startup: added ingestion job")
         scheduler.start()
         print("startup: scheduler.start() returned")
     except Exception as e:
         import traceback
+
         print("startup: scheduler failed to start:", e)
         traceback.print_exc()
         raise
@@ -110,14 +120,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print("shutdown: scheduler.shutdown() raised:", e)
 
+
 app = FastAPI(title="Osteosarcoma Clinical Trial Explorer", lifespan=lifespan)
 
 # CORS configuration
 origins = [
     "http://localhost:5173",  # Vite dev server
     "http://localhost:3000",
-    "https://my-railway-url.app", # Replace with actual domain if known
-    "*" # Allow all for simplicity in this context, refine for production
+    "https://my-railway-url.app",  # Replace with actual domain if known
+    "*",  # Allow all for simplicity in this context, refine for production
 ]
 
 app.add_middleware(
@@ -135,32 +146,46 @@ admin.add_view(ClinicalTrialAdmin)
 # Include API Router
 app.include_router(api_router, prefix="/api/v1")
 
+
 @app.post("/api/v1/debug/run-ingestion")
 async def debug_ingestion():
-    # Import dynamically so tests can monkeypatch `app.services.ingestion.run_daily_ingestion`
+    # Import dynamically so tests can monkeypatch
+    # `app.services.ingestion.run_daily_ingestion`
     import app.services.ingestion as ingestion
+
     await ingestion.run_daily_ingestion()
     return {"status": "started"}
 
+
 # Mount static files
-# Only mount if the directory exists (it will in Docker, maybe not in local dev unless built)
-static_dir = os.path.join(os.path.dirname(__file__), "static") # Assumes /app/static in docker
+# (it will in Docker, maybe not in local dev unless built)
+static_dir = os.path.join(
+    os.path.dirname(__file__), "static"
+)  # Assumes /app/static in docker
 if not os.path.exists(static_dir):
     # Fallback for local development or if static dir is different
-    static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "dist")
+    static_dir = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)), "frontend", "dist"
+    )
 
 if os.path.exists(static_dir):
-    app.mount("/assets", StaticFiles(directory=os.path.join(static_dir, "assets")), name="assets")
+    app.mount(
+        "/assets",
+        StaticFiles(directory=os.path.join(static_dir, "assets")),
+        name="assets",
+    )
+
 
 @app.get("/{full_path:path}")
 async def serve_spa(full_path: str):
-    # Check if API request first (though API router handles matches before this if included first? No, path matches are tricky)
+    # Check if API request first (though API router handles matches before this
+    # if included first? No, path matches are tricky)
     # Actually, if we use app.mount for static, specific paths are handled.
     # The Catch-all should be last.
-    
+
     if full_path.startswith("api"):
         return {"error": "API route not found"}
-        
+
     # Serve index.html for SPA
     index_file = os.path.join(static_dir, "index.html")
     if os.path.exists(index_file):

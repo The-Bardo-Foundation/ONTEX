@@ -255,37 +255,91 @@ alembic upgrade head --sql
 
 ---
 
-## Testing
+## Testing & Quality Assurance
 
-### Backend Tests
+We use a comprehensive suite of tools to ensure code quality.
 
-Create test files in a `tests/` directory:
+### 1. Backend (Python)
 
-```python
-# tests/test_api.py
-from fastapi.testclient import TestClient
-from app.main import app
-
-client = TestClient(app)
-
-def test_get_trials():
-    response = client.get("/api/trials")
-    assert response.status_code == 200
-```
-
-Run tests:
+**Run Unit Tests:**
 ```powershell
-pip install pytest pytest-asyncio
-pytest tests/ -v
+# Run all tests
+pytest
+
+# Run with verbose output
+pytest -v
+
+# Run a specific test file
+pytest tests/test_api.py
 ```
 
-### Frontend Tests
-
+**Linting & Formatting:**
+We use [Ruff](https://docs.astral.sh/ruff/) for both linting and formatting.
 ```powershell
-cd frontend
-npm run lint          # Check code style
-npm run build        # Check if it builds
+# Check for linting errors
+ruff check .
+
+# Fix auto-fixable errors
+ruff check --fix .
+
+# Check formatting
+ruff format --check .
+
+# Apply formatting
+ruff format .
 ```
+
+### 2. Frontend (React/TypeScript)
+
+Navigate to the frontend directory first: `cd frontend`
+
+**Type Checking:**
+```powershell
+# Runs the TypeScript compiler to check for type errors
+npm run build
+```
+
+**Linting:**
+We use ESLint with Prettier.
+```powershell
+# Check for linting errors
+npm run lint
+
+# Fix auto-fixable errors
+npm run lint -- --fix
+```
+
+**Formatting:**
+```powershell
+# Check formatting
+npx prettier --check .
+
+# Fix formatting
+npx prettier --write .
+```
+
+### 3. Pre-commit Hooks (Automated Checks)
+
+We use `pre-commit` to automatically run checks before you commit. This prevents bad code from entering the repo.
+
+**Setup (Run once):**
+```powershell
+pip install pre-commit
+pre-commit install
+```
+
+**How it works:**
+When you run `git commit`, the hooks will run. If any check fails (e.g., bad formatting), the commit is blocked. The tool will often auto-fix the issue. You just need to `git add` the fixed files and commit again.
+
+**Run manually on all files:**
+```powershell
+pre-commit run --all-files
+```
+
+### 4. CI/CD Pipeline
+
+GitHub Actions runs these checks automatically on every push and Pull Request. You can see the configuration in `.github/workflows/ci.yml`.
+
 
 ### Manual Testing Checklist
 
