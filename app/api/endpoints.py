@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import AsyncGenerator, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from app.api.middleware import clerk_user
+from app.api.middleware import clerk_user, optional_clerk_user
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, or_, select
@@ -306,6 +306,7 @@ async def get_trials(
     sort_by: Optional[str] = None,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    clerk_user_claims: Optional[dict] = Depends(optional_clerk_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -322,10 +323,14 @@ async def get_trials(
     - page / page_size: 1-based pagination
     """
     stmt = select(ClinicalTrial)
+    is_admin = clerk_user_claims is not None
 
-    if status:
+    if not is_admin:
+        stmt = stmt.where(ClinicalTrial.status == TrialStatus.APPROVED)
+    elif status:
         stmt = stmt.where(ClinicalTrial.status == status)
-    if ingestion_event:
+
+    if ingestion_event and is_admin:
         stmt = stmt.where(ClinicalTrial.ingestion_event == ingestion_event)
     if phase:
         stmt = stmt.where(ClinicalTrial.phase.ilike(f"%{phase}%"))

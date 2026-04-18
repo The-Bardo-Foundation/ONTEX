@@ -151,3 +151,12 @@ async def clerk_user(
             detail=f"Invalid token: {exc}",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+
+async def optional_clerk_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
+) -> Optional[dict[str, Any]]:
+    """Return validated Clerk claims when credentials are provided, else None."""
+    if credentials is None:
+        return None
+    return await clerk_user(credentials)
