@@ -26,6 +26,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # alembic_version.version_num was created as VARCHAR(32); our revision IDs exceed that
+    op.execute("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(256)")
     op.add_column("clinical_trials", sa.Column("ai_relevance_confidence", sa.Float(), nullable=True))
     op.add_column("clinical_trials", sa.Column("ai_relevance_reason", sa.Text(), nullable=True))
     op.add_column("clinical_trials", sa.Column("ai_relevance_tier", sa.String(), nullable=True))
