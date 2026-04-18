@@ -489,6 +489,15 @@ async def test_get_trials_filter_ingestion_event(test_client, db_engine):
     assert body["total"] == 1
     assert body["items"][0]["nct_id"] == "NCT30000010"
 
+    r_updated = await test_client.get(
+        "/api/v1/trials?ingestion_event=UPDATED",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert r_updated.status_code == 200
+    updated_body = r_updated.json()
+    assert updated_body["total"] == 1
+    assert updated_body["items"][0]["nct_id"] == "NCT30000011"
+
 
 @pytest.mark.asyncio
 async def test_get_trials_sort_brief_title(test_client, db_engine):

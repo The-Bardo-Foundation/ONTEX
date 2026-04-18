@@ -323,14 +323,14 @@ async def get_trials(
     - page / page_size: 1-based pagination
     """
     stmt = select(ClinicalTrial)
-    is_admin = clerk_user_claims is not None
+    is_authenticated = clerk_user_claims is not None
 
-    if not is_admin:
+    if not is_authenticated:
         stmt = stmt.where(ClinicalTrial.status == TrialStatus.APPROVED)
     elif status:
         stmt = stmt.where(ClinicalTrial.status == status)
 
-    if ingestion_event and is_admin:
+    if ingestion_event and is_authenticated:
         stmt = stmt.where(ClinicalTrial.ingestion_event == ingestion_event)
     if phase:
         stmt = stmt.where(ClinicalTrial.phase.ilike(f"%{phase}%"))
