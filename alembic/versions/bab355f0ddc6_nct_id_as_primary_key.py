@@ -56,7 +56,9 @@ def upgrade() -> None:
     sa.Column('custom_last_update_post_date', sa.String(), nullable=True),
     sa.PrimaryKeyConstraint('nct_id')
     )
-    op.add_column('clinical_trials', sa.Column('brief_title', sa.String(), nullable=False))
+    op.add_column('clinical_trials', sa.Column('brief_title', sa.String(), nullable=True))
+    op.execute("UPDATE clinical_trials SET brief_title = title WHERE brief_title IS NULL")
+    op.alter_column('clinical_trials', 'brief_title', nullable=False)
     op.add_column('clinical_trials', sa.Column('custom_brief_title', sa.String(), nullable=True))
     op.add_column('clinical_trials', sa.Column('brief_summary', sa.Text(), nullable=True))
     op.add_column('clinical_trials', sa.Column('custom_brief_summary', sa.Text(), nullable=True))
