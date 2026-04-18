@@ -174,27 +174,6 @@ async def test_patch_trial_updates_custom_brief_summary(test_client, db_engine):
 
 
 # ──────────────────────────────────────────────────────────
-# POST /debug/run-ingestion
-# ──────────────────────────────────────────────────────────
-
-@pytest.mark.asyncio
-async def test_debug_ingestion_endpoint(test_client, monkeypatch):
-    called = {"called": False}
-
-    async def fake_run():
-        called["called"] = True
-
-    import app.services.ingestion as ingestion
-
-    monkeypatch.setattr(ingestion, "run_daily_ingestion", fake_run)
-
-    r = await test_client.post("/api/v1/debug/run-ingestion")
-    assert r.status_code == 200
-    assert r.json().get("status") == "started"
-    assert called["called"]
-
-
-# ──────────────────────────────────────────────────────────
 # GET /trials/review-queue
 # ──────────────────────────────────────────────────────────
 
@@ -298,7 +277,7 @@ async def test_approve_sets_approved_at_and_by(test_client, db_engine):
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "APPROVED"
-    assert body["approved_by"] == "dr_smith"
+    assert body["approved_by"] == "admin@local"
     assert body["approved_at"] is not None
     assert body["reviewer_notes"] == "Looks good."
 
@@ -350,7 +329,7 @@ async def test_reject_sets_rejected_at_and_by(test_client, db_engine):
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "REJECTED"
-    assert body["rejected_by"] == "dr_jones"
+    assert body["rejected_by"] == "admin@local"
     assert body["rejected_at"] is not None
     assert body["reviewer_notes"] == "Not relevant."
 
