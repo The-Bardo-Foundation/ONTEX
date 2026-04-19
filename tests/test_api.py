@@ -1,3 +1,6 @@
+import json
+from unittest.mock import AsyncMock
+
 import pytest
 
 from app.db.models import ClinicalTrial, IngestionEvent, TrialStatus
@@ -518,3 +521,59 @@ async def test_get_trials_sort_brief_title(test_client, db_engine):
     items = r.json()["items"]
     assert items[0]["brief_title"] == "Alpha Trial"
     assert items[1]["brief_title"] == "Zebra Trial"
+
+
+def _parse_sse_events(raw_text: str) -> list[dict]:
+    events = []
+    for line in raw_text.splitlines():
+        if line.startswith("data: "):
+            events.append(json.loads(line[6:]))
+    return events
+
+
+@pytest.mark.asyncio
+async def test_ingestion_run_stream_rejects_unauthenticated_when_auth_enabled(test_client, monkeypatch):
+    monkeypatch.delenv("SKIP_AUTH_FOR_TESTS", raising=False)
+    r = await test_client.get("/api/v1/ingestion/run-stream")
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_ingestion_run_stream_returns_error_event_when_already_running(test_client, monkeypatch):
+    import app.api.endpoints as endpoints
+
+    monkeypatch.setattr(endpoints, "_try_acquire_ingestion_lock", AsyncMock(return_value=False))
+
+    r = await test_client.get(
+        "/api/v1/ingestion/run-stream",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert r.status_code == 200
+    events = _parse_sse_events(r.text)
+    assert len(events) == 1
+    assert events[0]["step"] == "error"
+    assert "already running" in events[0]["message"].lower()
+
+
+@pytest.mark.asyncio
+async def test_ingestion_run_stream_emits_progress_and_complete_events(test_client, monkeypatch):
+    import app.api.endpoints as endpoints
+    import app.services.ingestion as ingestion
+
+    async def fake_run_daily_ingestion(progress_callback=None):
+        if progress_callback:
+            await progress_callback({"step": "progress", "message": "started"})
+
+    monkeypatch.setattr(endpoints, "_try_acquire_ingestion_lock", AsyncMock(return_value=True))
+    monkeypatch.setattr(endpoints, "_release_ingestion_lock", AsyncMock(return_value=None))
+    monkeypatch.setattr(ingestion, "run_daily_ingestion", fake_run_daily_ingestion)
+
+    r = await test_client.get(
+        "/api/v1/ingestion/run-stream",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert r.status_code == 200
+    events = _parse_sse_events(r.text)
+    steps = [event["step"] for event in events]
+    assert "progress" in steps
+    assert "complete" in steps

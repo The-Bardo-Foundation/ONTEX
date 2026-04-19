@@ -538,7 +538,10 @@ async def update_trial(
 # ──────────────────────────────────────────────────────────────────────────────
 
 @router.get("/ingestion/run-stream")
-async def run_ingestion_stream(_user: dict = Depends(clerk_user)):
+async def run_ingestion_stream(
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
     """
     Start the ingestion pipeline and stream progress events as Server-Sent Events.
 
@@ -546,16 +549,12 @@ async def run_ingestion_stream(_user: dict = Depends(clerk_user)):
     Only one ingestion run is allowed at a time — returns an error event if one
     is already in progress.
     """
-    global _ingestion_running
-
     async def event_stream() -> AsyncGenerator[str, None]:
-        global _ingestion_running
-
-        if _ingestion_running:
+        lock_acquired = await _try_acquire_ingestion_lock(db)
+        if not lock_acquired:
             yield f"data: {json.dumps({'step': 'error', 'message': 'Ingestion already running'})}\n\n"
             return
 
-        _ingestion_running = True
         queue: asyncio.Queue[Optional[dict]] = asyncio.Queue()
 
         async def progress_callback(event: dict) -> None:
@@ -567,6 +566,8 @@ async def run_ingestion_stream(_user: dict = Depends(clerk_user)):
                 await ingestion.run_daily_ingestion(progress_callback=progress_callback)
             except Exception as exc:
                 await queue.put({"step": "error", "message": str(exc)})
+            else:
+                await queue.put({"step": "complete"})
             finally:
                 await queue.put(None)  # sentinel
 
@@ -579,7 +580,7 @@ async def run_ingestion_stream(_user: dict = Depends(clerk_user)):
                     break
                 yield f"data: {json.dumps(event)}\n\n"
         finally:
-            _ingestion_running = False
+            await _release_ingestion_lock(db)
             task.cancel()
 
     return StreamingResponse(
