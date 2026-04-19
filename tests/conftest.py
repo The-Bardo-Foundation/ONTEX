@@ -19,10 +19,10 @@ def pytest_configure(config):
     database.py creates engine = create_async_engine(settings.DATABASE_URL)
     at module level. This hook fires before collection imports test modules,
     ensuring the singleton engine points to in-memory SQLite, not a real DB.
-    OPENAI_API_KEY must be a non-sentinel value so AIClient.__init__ doesn't raise.
+    OPENROUTER_API_KEY must be a non-sentinel value so AIClient.__init__ doesn't raise.
     """
     os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
-    os.environ["OPENAI_API_KEY"] = "sk-test-not-real"
+    os.environ["OPENROUTER_API_KEY"] = "sk-test-not-real"
     os.environ["SKIP_MIGRATIONS"] = "1"
     os.environ["SKIP_AUTH_FOR_TESTS"] = "1"
 

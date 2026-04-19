@@ -387,7 +387,7 @@ Set these in Railway dashboard:
 
 ```
 DATABASE_URL=postgresql+asyncpg://user:password@host:5432/db
-OPENAI_API_KEY=sk-proj-xxx
+OPENROUTER_API_KEY=sk-or-xxx
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=secure-password
 ENVIRONMENT=railway

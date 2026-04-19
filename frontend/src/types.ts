@@ -54,9 +54,8 @@ export interface TrialDetail {
   custom_last_update_post_date: string | null;
 
   // AI classification
-  ai_relevance_confidence: number | null;
+  ai_relevance_label: 'confident' | 'unsure' | 'reject' | null;
   ai_relevance_reason: string | null;
-  ai_relevance_tier: string | null;
   ai_matching_criteria: string | null; // JSON string
 
   // Workflow tracking

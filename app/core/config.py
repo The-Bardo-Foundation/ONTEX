@@ -16,7 +16,7 @@ def get_env_file() -> str:
 class Settings(BaseSettings):
     # Use a local async sqlite DB for local development by default.
     DATABASE_URL: str = "sqlite+aiosqlite:///./ontex.db"
-    OPENAI_API_KEY: str = "Not Set"
+    OPENROUTER_API_KEY: str = "Not Set"
     ADMIN_USERNAME: str = "admin"
     ADMIN_PASSWORD: Optional[str] = None  # Must be set via environment variable in production
     ENVIRONMENT: str = "local"  # local, staging, production
@@ -32,8 +32,7 @@ class Settings(BaseSettings):
     # SEARCH_TERMS can be overridden via env var as JSON: SEARCH_TERMS='["osteosarcoma","bone sarcoma"]'
     SEARCH_TERMS: list[str] = ["osteosarcoma"]
     INGESTION_SCHEDULE_HOURS: int = 24
-    AI_MODEL: str = "gpt-4o-mini"
-    CONFIDENCE_THRESHOLD: float = 0.7
+    AI_MODEL: str = "openai/gpt-4o-mini"
     PAGE_SIZE: int = 100
 
     model_config = SettingsConfigDict(

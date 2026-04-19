@@ -12,7 +12,7 @@ Covers:
 - Missing nct_id from map_api_to_model: trial skipped
 - Missing brief_title from API: map_api_to_model uses safe fallback
 - AI summarisation failure: custom_* fields remain None, trial still processed
-- AI classification failure: safe default (is_relevant=True, PENDING_REVIEW)
+- AI classification failure: safe default (label=unsure, PENDING_REVIEW)
 - Admin-edited custom_* fields preserved on re-ingestion
 """
 
@@ -25,23 +25,19 @@ from unittest.mock import AsyncMock, MagicMock
 
 from app.db.database import Base
 from app.db.models import ClinicalTrial, IngestionEvent, IrrelevantTrial, TrialStatus
-from app.services.ai.schemas import ClassificationResult, RelevanceTier
+from app.services.ai.schemas import ClassificationResult, ConfidenceLabel
 from app.services.ctgov.study_detail import map_api_to_model
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def make_classification(
-    is_relevant: bool = True,
-    confidence: float = 0.9,
-    tier: RelevanceTier = RelevanceTier.PRIMARY,
+    label: ConfidenceLabel = ConfidenceLabel.CONFIDENT,
     reason: str = "osteosarcoma mentioned",
 ) -> ClassificationResult:
     return ClassificationResult(
-        is_relevant=is_relevant,
-        confidence=confidence,
+        label=label,
         reason=reason,
-        relevance_tier=tier,
         matching_criteria=["osteosarcoma_in_conditions"],
     )
 
@@ -154,7 +150,7 @@ async def test_new_relevant_trial_stored_as_pending_review(tmp_path, monkeypatch
     )
     monkeypatch.setattr(
         "app.services.ingestion.classify_trial",
-        AsyncMock(return_value=make_classification(is_relevant=True)),
+        AsyncMock(return_value=make_classification()),
     )
 
     from app.services.ingestion import run_daily_ingestion
@@ -201,7 +197,7 @@ async def test_new_irrelevant_trial_stored_in_irrelevant_table(tmp_path, monkeyp
     )
     monkeypatch.setattr(
         "app.services.ingestion.classify_trial",
-        AsyncMock(return_value=make_classification(is_relevant=False, confidence=0.95)),
+        AsyncMock(return_value=make_classification(label=ConfidenceLabel.REJECT)),
     )
 
     from app.services.ingestion import run_daily_ingestion
@@ -258,7 +254,7 @@ async def test_updated_trial_resets_status_to_pending_review(tmp_path, monkeypat
     )
     monkeypatch.setattr(
         "app.services.ingestion.classify_trial",
-        AsyncMock(return_value=make_classification(is_relevant=True)),
+        AsyncMock(return_value=make_classification()),
     )
 
     from app.services.ingestion import run_daily_ingestion
@@ -313,7 +309,7 @@ async def test_rejected_trial_reeval_moved_to_clinical_trials(tmp_path, monkeypa
     )
     monkeypatch.setattr(
         "app.services.ingestion.classify_trial",
-        AsyncMock(return_value=make_classification(is_relevant=True)),
+        AsyncMock(return_value=make_classification()),
     )
 
     from app.services.ingestion import run_daily_ingestion
@@ -424,7 +420,7 @@ async def test_clinical_trial_reclassified_irrelevant_removes_clinical_row(tmp_p
     )
     monkeypatch.setattr(
         "app.services.ingestion.classify_trial",
-        AsyncMock(return_value=make_classification(is_relevant=False, confidence=0.95)),
+        AsyncMock(return_value=make_classification(label=ConfidenceLabel.REJECT)),
     )
 
     from app.services.ingestion import run_daily_ingestion
@@ -517,7 +513,7 @@ async def test_ai_summarisation_failure_trial_still_processed(tmp_path, monkeypa
     )
     monkeypatch.setattr(
         "app.services.ingestion.classify_trial",
-        AsyncMock(return_value=make_classification(is_relevant=True)),
+        AsyncMock(return_value=make_classification()),
     )
 
     from app.services.ingestion import run_daily_ingestion
@@ -536,9 +532,9 @@ async def test_ai_summarisation_failure_trial_still_processed(tmp_path, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_ai_classification_failure_defaults_to_relevant(tmp_path, monkeypatch):
-    """If classify_trial raises an exception, the trial should default to relevant
-    (is_relevant=True) so no trial is silently lost."""
+async def test_ai_classification_failure_defaults_to_unsure(tmp_path, monkeypatch):
+    """If classify_trial raises an exception, the trial should default to unsure
+    so no trial is silently lost."""
     engine, factory = _make_test_db(tmp_path, "test9.db")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -576,7 +572,7 @@ async def test_ai_classification_failure_defaults_to_relevant(tmp_path, monkeypa
         trial = await db.get(ClinicalTrial, "NCT99999999")
         assert trial is not None
         assert trial.status == TrialStatus.PENDING_REVIEW
-        assert trial.ai_relevance_confidence == 0.0
+        assert trial.ai_relevance_label == "unsure"
 
     await engine.dispose()
 
@@ -625,7 +621,7 @@ async def test_admin_edited_custom_fields_preserved_on_update(tmp_path, monkeypa
     )
     monkeypatch.setattr(
         "app.services.ingestion.classify_trial",
-        AsyncMock(return_value=make_classification(is_relevant=True)),
+        AsyncMock(return_value=make_classification()),
     )
 
     from app.services.ingestion import run_daily_ingestion
@@ -763,7 +759,7 @@ async def test_new_trial_has_ingestion_event_new(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         "app.services.ingestion.classify_trial",
-        AsyncMock(return_value=make_classification(is_relevant=True)),
+        AsyncMock(return_value=make_classification()),
     )
 
     from app.services.ingestion import run_daily_ingestion
@@ -818,7 +814,7 @@ async def test_updated_trial_has_ingestion_event_updated(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         "app.services.ingestion.classify_trial",
-        AsyncMock(return_value=make_classification(is_relevant=True)),
+        AsyncMock(return_value=make_classification()),
     )
 
     from app.services.ingestion import run_daily_ingestion
@@ -878,7 +874,7 @@ async def test_approved_trial_update_saves_previous_official_snapshot(tmp_path, 
     )
     monkeypatch.setattr(
         "app.services.ingestion.classify_trial",
-        AsyncMock(return_value=make_classification(is_relevant=True)),
+        AsyncMock(return_value=make_classification()),
     )
 
     from app.services.ingestion import run_daily_ingestion

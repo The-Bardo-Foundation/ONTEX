@@ -259,7 +259,7 @@ async def test_get_trial_detail_full_fields(test_client, db_engine):
                 brief_summary="Official summary.",
                 custom_brief_summary="Custom summary.",
                 phase="Phase 2",
-                ai_relevance_confidence=0.85,
+                ai_relevance_label="confident",
                 ai_relevance_reason="Matches criteria.",
                 status=TrialStatus.PENDING_REVIEW,
                 ingestion_event=IngestionEvent.NEW,
@@ -274,7 +274,7 @@ async def test_get_trial_detail_full_fields(test_client, db_engine):
     assert body["brief_summary"] == "Official summary."
     assert body["custom_brief_summary"] == "Custom summary."
     assert body["phase"] == "Phase 2"
-    assert body["ai_relevance_confidence"] == 0.85
+    assert body["ai_relevance_label"] == "confident"
     assert body["ai_relevance_reason"] == "Matches criteria."
     assert body["ingestion_event"] == "NEW"
 

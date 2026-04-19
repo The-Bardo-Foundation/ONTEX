@@ -5,27 +5,30 @@ from openai import AsyncOpenAI
 
 from app.core.config import settings
 
-from .schemas import ClassificationResult
+from .schemas import ClassificationResult, ConfidenceLabel
 
 logger = logging.getLogger(__name__)
 
 
 class AIClient:
     def __init__(self, api_key: str | None = None, model: str | None = None):
-        resolved_api_key = api_key or settings.OPENAI_API_KEY
+        resolved_api_key = api_key or settings.OPENROUTER_API_KEY
         # Fail fast with a clear error if the API key is not configured properly.
         if (
             not resolved_api_key
             or not str(resolved_api_key).strip()
-            or "your_openai_api_key" in str(resolved_api_key).lower()
+            or "your_openrouter_api_key" in str(resolved_api_key).lower()
             or "changeme" in str(resolved_api_key).lower()
             or "not set" in str(resolved_api_key).lower()
         ):
             raise RuntimeError(
-                "OPENAI_API_KEY is not configured. Set a valid key in "
-                "settings.OPENAI_API_KEY or pass api_key to AIClient."
+                "OPENROUTER_API_KEY is not configured. Set a valid key in "
+                "settings.OPENROUTER_API_KEY or pass api_key to AIClient."
             )
-        self._client = AsyncOpenAI(api_key=resolved_api_key)
+        self._client = AsyncOpenAI(
+            api_key=resolved_api_key,
+            base_url="https://openrouter.ai/api/v1",
+        )
         self._model = model or settings.AI_MODEL
 
     async def generate_summaries(
@@ -99,14 +102,12 @@ class AIClient:
                     "classify_trial attempt %d failed: %s", attempt + 1, e
                 )
 
-        # Never lose a trial — default to relevant
+        # Never lose a trial — default to unsure so editorial team can review
         logger.error(
             "classify_trial failed after %d attempts: %s", 1 + max_retries, last_error
         )
         return ClassificationResult(
-            is_relevant=True,
-            confidence=0.0,
+            label=ConfidenceLabel.UNSURE,
             reason="AI evaluation failed -- needs manual review",
-            relevance_tier="secondary",
             matching_criteria=["none"],
         )
