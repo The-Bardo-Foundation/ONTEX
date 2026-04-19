@@ -138,10 +138,13 @@ async def clerk_user(
             options={"verify_aud": False},
         )
 
-        # Normalise: extract a useful "email" field from Clerk's primary_email_address
-        # claim or the standard email claim if present.
-        if "email" not in claims:
-            claims["email"] = claims.get("primary_email_address_id") or claims.get("sub")
+        # Normalise: preserve a real "email" claim when present, or copy Clerk's
+        # "email_address" claim into "email". Do not use
+        # "primary_email_address_id" here because it is an identifier, not an
+        # email address. If no email-like claim is present, leave "email" unset so
+        # callers can fall back to "sub".
+        if "email" not in claims and claims.get("email_address"):
+            claims["email"] = claims["email_address"]
 
         return claims
 
