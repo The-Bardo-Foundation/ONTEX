@@ -231,11 +231,15 @@ async def get_trial_facets(db: AsyncSession = Depends(get_db)):
 
     - countries: sorted list of individual country names (split from comma-joined location_country)
     """
+    country_field = func.coalesce(
+        ClinicalTrial.custom_location_country,
+        ClinicalTrial.location_country,
+    )
     stmt = (
-        select(ClinicalTrial.location_country)
+        select(country_field)
         .where(
             ClinicalTrial.status == TrialStatus.APPROVED,
-            ClinicalTrial.location_country.isnot(None),
+            country_field.isnot(None),
         )
         .distinct()
     )
