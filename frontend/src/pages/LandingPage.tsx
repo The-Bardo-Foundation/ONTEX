@@ -184,7 +184,7 @@ const PIPELINE_STEPS = [
   {
     number: 2,
     title: 'AI Classification',
-    summary: 'Claude AI reads each trial and assigns a relevance label',
+    summary: 'An AI model reads each trial and assigns a relevance label',
     detail: null, // rendered separately
   },
   {
