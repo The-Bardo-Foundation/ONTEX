@@ -9,10 +9,11 @@ PIPELINE OVERVIEW
 Step 1  Collect NCT IDs + last-update dates for each search term
 Step 2  Classify each NCT ID against the database (new / updated / rejected / no-change)
 Step 3  Fetch full trial data from ClinicalTrials.gov API v2
-Step 4  Generate patient-friendly custom_* fields via AI summarisation
-Step 5  Classify relevance with AI; upsert into clinical_trials or irrelevant_trials
-Step 6  Re-evaluate previously rejected trials whose data has changed
-Step 7  Log run summary
+Step 4  Classify relevance with AI (confident / unsure / reject)
+Step 5  Generate patient-friendly custom_* fields via AI summarisation (confident/unsure only)
+Step 6  Upsert into clinical_trials or irrelevant_trials
+Step 7  Re-evaluate previously rejected trials whose data has changed
+Step 8  Log run summary
 
 TABLES
 ======
@@ -130,7 +131,7 @@ async def run_daily_ingestion(
         new_trials.append(nct_id)
 
     # ──────────────────────────────────────────────────────────
-    # STEP 6 prep — Determine which rejected trials need re-evaluation
+    # STEP 7 prep — Determine which rejected trials need re-evaluation
     # (done here so reeval_list can extend trials_to_process before Step 3)
     # ──────────────────────────────────────────────────────────
     reeval_list = [
@@ -266,13 +267,61 @@ async def run_daily_ingestion(
                             }
 
     # ──────────────────────────────────────────────────────────
-    # STEP 4 — AI summarisation: populate custom_* fields
+    # STEP 4 — Relevance classification
     # AIClient is instantiated once per run (one connection pool).
-    # If OPENROUTER_API_KEY is not set, AIClient raises RuntimeError here —
-    # the ingestion run is aborted rather than silently writing null summaries.
+    # If OPENROUTER_API_KEY is not set, AIClient raises RuntimeError here.
     # ──────────────────────────────────────────────────────────
     ai_client = AIClient()
-    summarize_total = len(fetched)
+    classify_errors = 0
+    classify_total = len(fetched)
+
+    # classifications[nct_id] = ClassificationResult
+    classifications: dict[str, ClassificationResult] = {}
+
+    await emit({
+        "step": "classifying",
+        "label": "AI classification",
+        "count": 0,
+        "total": classify_total,
+    })
+
+    for classify_idx, trial_data in enumerate(fetched):
+        nct_id = trial_data.get("nct_id")
+        try:
+            classification = await classify_trial(ai_client, trial_data)
+        except Exception as exc:
+            logger.error("classify_trial raised for %s: %s", nct_id, exc)
+            classify_errors += 1
+            # Fail-safe: include for manual review rather than silently skip
+            classification = ClassificationResult(
+                label=ConfidenceLabel.UNSURE,
+                reason=f"Classification error — needs manual review: {exc}",
+                matching_criteria=["none"],
+            )
+        classifications[nct_id] = classification
+        await emit({
+            "step": "classifying",
+            "label": "AI classification",
+            "count": classify_idx + 1,
+            "total": classify_total,
+        })
+
+    # Split fetched trials: only confident/unsure get AI summaries
+    to_summarize = [
+        td for td in fetched
+        if classifications.get(td.get("nct_id"), ClassificationResult(
+            label=ConfidenceLabel.REJECT, reason="", matching_criteria=[]
+        )).label != ConfidenceLabel.REJECT
+    ]
+    to_reject = [
+        td for td in fetched
+        if td not in to_summarize
+    ]
+
+    # ──────────────────────────────────────────────────────────
+    # STEP 5 — AI summarisation: populate custom_* fields for relevant trials only
+    # ──────────────────────────────────────────────────────────
+    summarize_total = len(to_summarize)
 
     await emit({
         "step": "summarizing",
@@ -281,11 +330,9 @@ async def run_daily_ingestion(
         "total": summarize_total,
     })
 
-    for summarize_idx, trial_data in enumerate(fetched):
+    for summarize_idx, trial_data in enumerate(to_summarize):
         custom_fields = await ai_generate_summaries(ai_client, trial_data)
         # Apply AI-generated fields, but preserve any non-null admin-edited values.
-        # For protected fields, restore the existing DB value into trial_data so
-        # that db.merge() does not overwrite it with None.
         protected = existing_custom_map.get(trial_data.get("nct_id"), {})
         for field, value in custom_fields.items():
             trial_data[field] = protected.get(field, value)
@@ -297,87 +344,59 @@ async def run_daily_ingestion(
         })
 
     # ──────────────────────────────────────────────────────────
-    # STEP 5 — Relevance classification + database upsert
+    # STEP 6 — Database upsert
     # ──────────────────────────────────────────────────────────
     processed = 0
     newly_irrelevant = 0
-    classify_errors = 0
-    classify_total = len(fetched)
 
     # Used to set ingestion_event: updated_trials are UPDATED, everything else is NEW
     updated_nct_ids = set(updated_trials)
 
-    await emit({
-        "step": "classifying",
-        "label": "AI classification",
-        "count": 0,
-        "total": classify_total,
-    })
-
     async with SessionLocal() as db:
-        for classify_idx, trial_data in enumerate(fetched):
+        for trial_data in to_summarize:
             nct_id = trial_data.get("nct_id")
+            classification = classifications[nct_id]
+            approval_history = existing_approval_map.get(nct_id, {})
+            event = IngestionEvent.UPDATED if nct_id in updated_nct_ids else IngestionEvent.NEW
+            snapshot = existing_snapshot_map.get(nct_id)
+            trial = ClinicalTrial(
+                **trial_data,
+                status=TrialStatus.PENDING_REVIEW,
+                ingestion_event=event,
+                ai_relevance_label=classification.label.value,
+                ai_relevance_reason=classification.reason,
+                ai_matching_criteria=json.dumps(classification.matching_criteria),
+                previous_approved_at=approval_history.get("approved_at"),
+                previous_approved_by=approval_history.get("approved_by"),
+                previous_official_snapshot=json.dumps(snapshot) if snapshot else None,
+            )
+            await db.merge(trial)
 
-            try:
-                classification = await classify_trial(ai_client, trial_data)
-            except Exception as exc:
-                logger.error("classify_trial raised for %s: %s", nct_id, exc)
-                classify_errors += 1
-                # Fail-safe: include for manual review rather than silently skip
-                classification = ClassificationResult(
-                    label=ConfidenceLabel.UNSURE,
-                    reason=f"Classification error — needs manual review: {exc}",
-                    matching_criteria=["none"],
-                )
+            if nct_id in rejected_nct_ids:
+                existing_irrelevant = await db.get(IrrelevantTrial, nct_id)
+                if existing_irrelevant:
+                    await db.delete(existing_irrelevant)
 
-            if classification.label != ConfidenceLabel.REJECT:
-                approval_history = existing_approval_map.get(nct_id, {})
-                event = IngestionEvent.UPDATED if nct_id in updated_nct_ids else IngestionEvent.NEW
-                snapshot = existing_snapshot_map.get(nct_id)
-                trial = ClinicalTrial(
-                    **trial_data,
-                    status=TrialStatus.PENDING_REVIEW,
-                    ingestion_event=event,
-                    ai_relevance_label=classification.label.value,
-                    ai_relevance_reason=classification.reason,
-                    ai_matching_criteria=json.dumps(classification.matching_criteria),
-                    previous_approved_at=approval_history.get("approved_at"),
-                    previous_approved_by=approval_history.get("approved_by"),
-                    previous_official_snapshot=json.dumps(snapshot) if snapshot else None,
-                )
-                await db.merge(trial)
+            processed += 1
 
-                # If this trial was previously in irrelevant_trials, remove it
-                if nct_id in rejected_nct_ids:
-                    existing_irrelevant = await db.get(IrrelevantTrial, nct_id)
-                    if existing_irrelevant:
-                        await db.delete(existing_irrelevant)
+        for trial_data in to_reject:
+            nct_id = trial_data.get("nct_id")
+            classification = classifications[nct_id]
+            irrelevant = IrrelevantTrial(
+                **trial_data,
+                irrelevance_reason=classification.reason,
+            )
+            await db.merge(irrelevant)
 
-                processed += 1
-            else:
-                irrelevant = IrrelevantTrial(
-                    **trial_data,
-                    irrelevance_reason=classification.reason,
-                )
-                await db.merge(irrelevant)
-
-                # If this trial was previously in clinical_trials, remove it
-                existing_clinical = await db.get(ClinicalTrial, nct_id)
-                if existing_clinical:
-                    await db.delete(existing_clinical)
-                newly_irrelevant += 1
-
-            await emit({
-                "step": "classifying",
-                "label": "AI classification",
-                "count": classify_idx + 1,
-                "total": classify_total,
-            })
+            existing_clinical = await db.get(ClinicalTrial, nct_id)
+            if existing_clinical:
+                await db.delete(existing_clinical)
+            newly_irrelevant += 1
 
         await db.commit()
 
     # ──────────────────────────────────────────────────────────
-    # STEP 7 — Write ingestion run record + log summary
+    # STEP 8 — Write ingestion run record + log summary
     # ──────────────────────────────────────────────────────────
     async with SessionLocal() as db:
         db.add(IngestionRun(
