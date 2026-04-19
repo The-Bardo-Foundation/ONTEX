@@ -5,7 +5,7 @@ from openai import AsyncOpenAI
 
 from app.core.config import settings
 
-from .schemas import ClassificationResult
+from .schemas import ClassificationResult, ConfidenceLabel
 
 logger = logging.getLogger(__name__)
 
@@ -102,13 +102,12 @@ class AIClient:
                     "classify_trial attempt %d failed: %s", attempt + 1, e
                 )
 
-        # Never lose a trial — default to relevant
+        # Never lose a trial — default to unsure so editorial team can review
         logger.error(
             "classify_trial failed after %d attempts: %s", 1 + max_retries, last_error
         )
         return ClassificationResult(
-            is_relevant=True,
-            confidence=0.0,
+            label=ConfidenceLabel.UNSURE,
             reason="AI evaluation failed -- needs manual review",
             relevance_tier="secondary",
             matching_criteria=["none"],

@@ -110,7 +110,7 @@ class TrialDetail(BaseModel):
     custom_last_update_post_date: Optional[str]
 
     # AI classification
-    ai_relevance_confidence: Optional[float]
+    ai_relevance_label: Optional[str]
     ai_relevance_reason: Optional[str]
     ai_relevance_tier: Optional[str]
     ai_matching_criteria: Optional[str]  # JSON string

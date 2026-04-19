@@ -2,7 +2,7 @@ import enum
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Enum, Float, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Enum, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.database import Base
@@ -87,7 +87,7 @@ class ClinicalTrial(ClinicalTrialBase, Base):
 
     # AI classification metadata (set during ingestion, not on IrrelevantTrial)
     # ai_matching_criteria is stored as a JSON string (json.dumps / json.loads at app layer)
-    ai_relevance_confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    ai_relevance_label: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     ai_relevance_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     ai_relevance_tier: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     ai_matching_criteria: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

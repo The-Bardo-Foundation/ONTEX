@@ -1,14 +1,19 @@
 import type { TrialDetail } from '../types';
 
-export function AiClassificationCard({ trial }: { trial: TrialDetail }) {
-  const { ai_relevance_confidence, ai_relevance_reason, ai_relevance_tier, ai_matching_criteria } = trial;
+const LABEL_STYLES: Record<string, string> = {
+  confident: 'bg-green-100 text-green-800',
+  unsure: 'bg-yellow-100 text-yellow-800',
+  reject: 'bg-red-100 text-red-800',
+};
 
-  if (ai_relevance_confidence === null && !ai_relevance_reason) return null;
+export function AiClassificationCard({ trial }: { trial: TrialDetail }) {
+  const { ai_relevance_label, ai_relevance_reason, ai_relevance_tier, ai_matching_criteria } = trial;
+
+  if (ai_relevance_label === null && !ai_relevance_reason) return null;
 
   const criteria: string[] = ai_matching_criteria ? JSON.parse(ai_matching_criteria) : [];
-  const pct = ai_relevance_confidence !== null ? Math.round(ai_relevance_confidence * 100) : null;
-
   const tierBg = ai_relevance_tier === 'primary' ? 'bg-blue-50 border-blue-200' : 'bg-yellow-50 border-yellow-200';
+  const labelStyle = ai_relevance_label ? (LABEL_STYLES[ai_relevance_label] ?? 'bg-gray-100 text-gray-700') : null;
 
   return (
     <div className={`rounded-lg border p-4 ${tierBg}`}>
@@ -21,18 +26,11 @@ export function AiClassificationCard({ trial }: { trial: TrialDetail }) {
         )}
       </div>
 
-      {pct !== null && (
+      {ai_relevance_label && labelStyle && (
         <div className="mb-3">
-          <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
-            <span>Confidence</span>
-            <span>{pct}%</span>
-          </div>
-          <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-blue-500 rounded-full"
-              style={{ width: `${pct}%` }}
-            />
-          </div>
+          <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${labelStyle}`}>
+            {ai_relevance_label}
+          </span>
         </div>
       )}
 
