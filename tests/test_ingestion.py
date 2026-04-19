@@ -532,7 +532,7 @@ async def test_ai_summarisation_failure_trial_still_processed(tmp_path, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_ai_classification_failure_defaults_to_relevant(tmp_path, monkeypatch):
+async def test_ai_classification_failure_defaults_to_unsure(tmp_path, monkeypatch):
     """If classify_trial raises an exception, the trial should default to unsure
     so no trial is silently lost."""
     engine, factory = _make_test_db(tmp_path, "test9.db")
