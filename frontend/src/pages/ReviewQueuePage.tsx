@@ -4,9 +4,8 @@ import { IngestionEventBadge } from '../components/IngestionEventBadge';
 import { TrialDetailView } from '../components/TrialDetailView';
 import type { CustomEdits, TrialDetail, TrialListItem } from '../types';
 
-const REVIEWER_USERNAME = 'admin'; // Phase 4 will pull this from auth
-
 export function ReviewQueuePage() {
+
   const [queue, setQueue] = useState<TrialListItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<TrialDetail | null>(null);
@@ -53,7 +52,6 @@ export function ReviewQueuePage() {
   async function handleApprove(reviewerNotes: string, edits: CustomEdits) {
     if (!selectedId) return;
     await approveTrial(selectedId, {
-      username: REVIEWER_USERNAME,
       reviewer_notes: reviewerNotes || undefined,
       ...edits,
     });
@@ -64,7 +62,6 @@ export function ReviewQueuePage() {
   async function handleReject(reviewerNotes: string) {
     if (!selectedId) return;
     await rejectTrial(selectedId, {
-      username: REVIEWER_USERNAME,
       reviewer_notes: reviewerNotes || undefined,
     });
     setQueue((q) => q.filter((t) => t.nct_id !== selectedId));

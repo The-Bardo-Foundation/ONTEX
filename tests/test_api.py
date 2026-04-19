@@ -1,3 +1,6 @@
+import json
+from unittest.mock import AsyncMock
+
 import pytest
 
 from app.db.models import ClinicalTrial, IngestionEvent, TrialStatus
@@ -93,7 +96,7 @@ async def test_get_trials_filters_by_status_approved(test_client, db_engine):
 
 
 @pytest.mark.asyncio
-async def test_get_trials_filters_by_status_pending_review(test_client, db_engine):
+async def test_get_trials_unauthenticated_forces_approved_status(test_client, db_engine):
     async with db_engine.begin() as conn:
         await conn.execute(
             ClinicalTrial.__table__.insert().values(
@@ -110,7 +113,32 @@ async def test_get_trials_filters_by_status_pending_review(test_client, db_engin
     assert r.status_code == 200
     body = r.json()
     assert body["total"] == 1
-    assert body["items"][0]["nct_id"] == "NCT00000021"
+    assert body["items"][0]["nct_id"] == "NCT00000020"
+    assert body["items"][0]["status"] == "APPROVED"
+
+
+@pytest.mark.asyncio
+async def test_get_trials_filters_by_status_pending_review_for_admin(test_client, db_engine):
+    async with db_engine.begin() as conn:
+        await conn.execute(
+            ClinicalTrial.__table__.insert().values(
+                nct_id="NCT00000022", brief_title="Approved Trial", status=TrialStatus.APPROVED
+            )
+        )
+        await conn.execute(
+            ClinicalTrial.__table__.insert().values(
+                nct_id="NCT00000023", brief_title="Pending Trial", status=TrialStatus.PENDING_REVIEW
+            )
+        )
+
+    r = await test_client.get(
+        "/api/v1/trials?status=PENDING_REVIEW",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] == 1
+    assert body["items"][0]["nct_id"] == "NCT00000023"
     assert body["items"][0]["status"] == "PENDING_REVIEW"
 
 
@@ -171,27 +199,6 @@ async def test_patch_trial_updates_custom_brief_summary(test_client, db_engine):
     body = r.json()
     assert body["status"] == "APPROVED"
     assert body["custom_brief_summary"] == "Admin note."
-
-
-# ──────────────────────────────────────────────────────────
-# POST /debug/run-ingestion
-# ──────────────────────────────────────────────────────────
-
-@pytest.mark.asyncio
-async def test_debug_ingestion_endpoint(test_client, monkeypatch):
-    called = {"called": False}
-
-    async def fake_run():
-        called["called"] = True
-
-    import app.services.ingestion as ingestion
-
-    monkeypatch.setattr(ingestion, "run_daily_ingestion", fake_run)
-
-    r = await test_client.post("/api/v1/debug/run-ingestion")
-    assert r.status_code == 200
-    assert r.json().get("status") == "started"
-    assert called["called"]
 
 
 # ──────────────────────────────────────────────────────────
@@ -298,7 +305,7 @@ async def test_approve_sets_approved_at_and_by(test_client, db_engine):
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "APPROVED"
-    assert body["approved_by"] == "dr_smith"
+    assert body["approved_by"] == "admin@local"
     assert body["approved_at"] is not None
     assert body["reviewer_notes"] == "Looks good."
 
@@ -350,7 +357,7 @@ async def test_reject_sets_rejected_at_and_by(test_client, db_engine):
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "REJECTED"
-    assert body["rejected_by"] == "dr_jones"
+    assert body["rejected_by"] == "admin@local"
     assert body["rejected_at"] is not None
     assert body["reviewer_notes"] == "Not relevant."
 
@@ -375,7 +382,7 @@ async def test_get_trials_pagination(test_client, db_engine):
                 ClinicalTrial.__table__.insert().values(
                     nct_id=f"NCT2000{i:04d}",
                     brief_title=f"Trial {i}",
-                    status=TrialStatus.PENDING_REVIEW,
+                    status=TrialStatus.APPROVED,
                 )
             )
 
@@ -430,6 +437,33 @@ async def test_get_trials_search_q(test_client, db_engine):
 
 
 @pytest.mark.asyncio
+async def test_get_trials_unauthenticated_ignores_ingestion_event_filter(test_client, db_engine):
+    async with db_engine.begin() as conn:
+        await conn.execute(
+            ClinicalTrial.__table__.insert().values(
+                nct_id="NCT30000008",
+                brief_title="Pending New Trial",
+                status=TrialStatus.PENDING_REVIEW,
+                ingestion_event=IngestionEvent.NEW,
+            )
+        )
+        await conn.execute(
+            ClinicalTrial.__table__.insert().values(
+                nct_id="NCT30000009",
+                brief_title="Approved Trial",
+                status=TrialStatus.APPROVED,
+            )
+        )
+
+    r = await test_client.get("/api/v1/trials?ingestion_event=NEW")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] == 1
+    assert body["items"][0]["nct_id"] == "NCT30000009"
+    assert body["items"][0]["status"] == "APPROVED"
+
+
+@pytest.mark.asyncio
 async def test_get_trials_filter_ingestion_event(test_client, db_engine):
     async with db_engine.begin() as conn:
         await conn.execute(
@@ -449,11 +483,23 @@ async def test_get_trials_filter_ingestion_event(test_client, db_engine):
             )
         )
 
-    r = await test_client.get("/api/v1/trials?ingestion_event=NEW")
+    r = await test_client.get(
+        "/api/v1/trials?ingestion_event=NEW",
+        headers={"Authorization": "Bearer test-token"},
+    )
     assert r.status_code == 200
     body = r.json()
     assert body["total"] == 1
     assert body["items"][0]["nct_id"] == "NCT30000010"
+
+    r_updated = await test_client.get(
+        "/api/v1/trials?ingestion_event=UPDATED",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert r_updated.status_code == 200
+    updated_body = r_updated.json()
+    assert updated_body["total"] == 1
+    assert updated_body["items"][0]["nct_id"] == "NCT30000011"
 
 
 @pytest.mark.asyncio
@@ -475,3 +521,85 @@ async def test_get_trials_sort_brief_title(test_client, db_engine):
     items = r.json()["items"]
     assert items[0]["brief_title"] == "Alpha Trial"
     assert items[1]["brief_title"] == "Zebra Trial"
+
+
+def _parse_sse_events(raw_text: str) -> list[dict]:
+    events = []
+    for line in raw_text.splitlines():
+        if line.startswith("data: "):
+            events.append(json.loads(line[6:]))
+    return events
+
+
+@pytest.mark.asyncio
+async def test_ingestion_run_stream_rejects_unauthenticated_when_auth_enabled(test_client, monkeypatch):
+    monkeypatch.delenv("SKIP_AUTH_FOR_TESTS", raising=False)
+    r = await test_client.get("/api/v1/ingestion/run-stream")
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_ingestion_run_stream_returns_error_event_when_already_running(test_client, monkeypatch):
+    import app.api.endpoints as endpoints
+
+    release_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr(endpoints, "_try_acquire_ingestion_lock", AsyncMock(return_value=False))
+    monkeypatch.setattr(endpoints, "_release_ingestion_lock", release_mock)
+
+    r = await test_client.get(
+        "/api/v1/ingestion/run-stream",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert r.status_code == 200
+    events = _parse_sse_events(r.text)
+    assert len(events) == 1
+    assert events[0]["step"] == "error"
+    assert "already running" in events[0]["message"].lower()
+    release_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ingestion_run_stream_emits_progress_and_complete_events(test_client, monkeypatch):
+    import app.api.endpoints as endpoints
+    import app.services.ingestion as ingestion
+
+    async def fake_run_daily_ingestion(progress_callback=None):
+        if progress_callback:
+            await progress_callback({"step": "progress", "message": "started"})
+
+    monkeypatch.setattr(endpoints, "_try_acquire_ingestion_lock", AsyncMock(return_value=True))
+    monkeypatch.setattr(endpoints, "_release_ingestion_lock", AsyncMock(return_value=None))
+    monkeypatch.setattr(ingestion, "run_daily_ingestion", fake_run_daily_ingestion)
+
+    r = await test_client.get(
+        "/api/v1/ingestion/run-stream",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert r.status_code == 200
+    events = _parse_sse_events(r.text)
+    steps = [event["step"] for event in events]
+    assert "progress" in steps
+    assert "complete" in steps
+
+
+@pytest.mark.asyncio
+async def test_ingestion_run_stream_emits_error_without_complete_on_failure(test_client, monkeypatch):
+    import app.api.endpoints as endpoints
+    import app.services.ingestion as ingestion
+
+    async def failing_run_daily_ingestion(progress_callback=None):
+        raise RuntimeError("ingestion failed")
+
+    monkeypatch.setattr(endpoints, "_try_acquire_ingestion_lock", AsyncMock(return_value=True))
+    monkeypatch.setattr(endpoints, "_release_ingestion_lock", AsyncMock(return_value=None))
+    monkeypatch.setattr(ingestion, "run_daily_ingestion", failing_run_daily_ingestion)
+
+    r = await test_client.get(
+        "/api/v1/ingestion/run-stream",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert r.status_code == 200
+    events = _parse_sse_events(r.text)
+    steps = [event["step"] for event in events]
+    assert "error" in steps
+    assert "complete" not in steps

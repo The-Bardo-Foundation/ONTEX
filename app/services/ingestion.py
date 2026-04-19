@@ -32,7 +32,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime
-from typing import List
+from typing import Any, Callable, Coroutine, List, Optional
 
 from sqlalchemy import select
 
@@ -48,17 +48,27 @@ from app.services.ctgov.study_detail import fetch_full_study, map_api_to_model
 logger = logging.getLogger(__name__)
 
 
+ProgressCallback = Optional[Callable[[dict[str, Any]], Coroutine[Any, Any, None]]]
+
+
 async def run_daily_ingestion(
     search_terms: List[str] | None = None,
+    progress_callback: ProgressCallback = None,
 ):
     if search_terms is None:
         search_terms = settings.SEARCH_TERMS
+
+    async def emit(event: dict[str, Any]) -> None:
+        if progress_callback:
+            await progress_callback(event)
 
     # ──────────────────────────────────────────────────────────
     # STEP 1 — Collect NCT IDs + last-update dates for each term
     # ──────────────────────────────────────────────────────────
     # nct_id → last_update_posted_date (ISO 8601 string or "" if unknown)
     all_candidates: dict[str, str] = {}
+
+    await emit({"step": "searching", "label": "Searching ClinicalTrials.gov"})
 
     for term in search_terms:
         # iter_study_index_rows is a blocking generator; run it in a thread
@@ -99,6 +109,12 @@ async def run_daily_ingestion(
         )
         rejected_map = {row.nct_id: row.last_update_post_date for row in result}
 
+    await emit({
+        "step": "searching_done",
+        "label": "Candidates found",
+        "count": len(all_candidates),
+    })
+
     for nct_id, api_date in all_candidates.items():
         if nct_id in existing_map:
             db_date = existing_map[nct_id] or ""
@@ -132,8 +148,16 @@ async def run_daily_ingestion(
     trials_to_process = new_trials + updated_trials + reeval_list
     fetched: list[dict] = []
     fetch_errors = 0
+    fetch_total = len(trials_to_process)
 
-    for nct_id in trials_to_process:
+    await emit({
+        "step": "fetching_details",
+        "label": "Fetching trial details",
+        "count": 0,
+        "total": fetch_total,
+    })
+
+    for fetch_idx, nct_id in enumerate(trials_to_process):
         raw = await asyncio.to_thread(fetch_full_study, nct_id)
         if raw is None:
             logger.warning("Skipping %s — fetch_full_study returned None", nct_id)
@@ -145,6 +169,12 @@ async def run_daily_ingestion(
             fetch_errors += 1
             continue
         fetched.append(mapped)
+        await emit({
+            "step": "fetching_details",
+            "label": "Fetching trial details",
+            "count": fetch_idx + 1,
+            "total": fetch_total,
+        })
 
     if not fetched:
         async with SessionLocal() as db:
@@ -158,6 +188,16 @@ async def run_daily_ingestion(
                 fetch_errors=fetch_errors,
             ))
             await db.commit()
+        await emit({
+            "step": "complete",
+            "label": "Done — no trials to process",
+            "new": 0,
+            "updated": 0,
+            "relevant": 0,
+            "irrelevant": 0,
+            "fetch_errors": fetch_errors,
+            "classify_errors": 0,
+        })
         logger.info(
             "Ingestion complete: no trials to process "
             "(search_terms=%s, candidates=%d, new=%d, updated=%d, reeval=%d, fetch_errors=%d)",
@@ -231,8 +271,16 @@ async def run_daily_ingestion(
     # the ingestion run is aborted rather than silently writing null summaries.
     # ──────────────────────────────────────────────────────────
     ai_client = AIClient()
+    summarize_total = len(fetched)
 
-    for trial_data in fetched:
+    await emit({
+        "step": "summarizing",
+        "label": "Generating summaries",
+        "count": 0,
+        "total": summarize_total,
+    })
+
+    for summarize_idx, trial_data in enumerate(fetched):
         custom_fields = await ai_generate_summaries(ai_client, trial_data)
         # Apply AI-generated fields, but preserve any non-null admin-edited values.
         # For protected fields, restore the existing DB value into trial_data so
@@ -240,6 +288,12 @@ async def run_daily_ingestion(
         protected = existing_custom_map.get(trial_data.get("nct_id"), {})
         for field, value in custom_fields.items():
             trial_data[field] = protected.get(field, value)
+        await emit({
+            "step": "summarizing",
+            "label": "Generating summaries",
+            "count": summarize_idx + 1,
+            "total": summarize_total,
+        })
 
     # ──────────────────────────────────────────────────────────
     # STEP 5 — Relevance classification + database upsert
@@ -247,12 +301,20 @@ async def run_daily_ingestion(
     processed = 0
     newly_irrelevant = 0
     classify_errors = 0
+    classify_total = len(fetched)
 
     # Used to set ingestion_event: updated_trials are UPDATED, everything else is NEW
     updated_nct_ids = set(updated_trials)
 
+    await emit({
+        "step": "classifying",
+        "label": "AI classification",
+        "count": 0,
+        "total": classify_total,
+    })
+
     async with SessionLocal() as db:
-        for trial_data in fetched:
+        for classify_idx, trial_data in enumerate(fetched):
             nct_id = trial_data.get("nct_id")
 
             try:
@@ -308,6 +370,13 @@ async def run_daily_ingestion(
                     await db.delete(existing_clinical)
                 newly_irrelevant += 1
 
+            await emit({
+                "step": "classifying",
+                "label": "AI classification",
+                "count": classify_idx + 1,
+                "total": classify_total,
+            })
+
         await db.commit()
 
     # ──────────────────────────────────────────────────────────
@@ -327,6 +396,17 @@ async def run_daily_ingestion(
             classify_errors=classify_errors,
         ))
         await db.commit()
+
+    await emit({
+        "step": "complete",
+        "label": "Done",
+        "new": len(new_trials),
+        "updated": len(updated_trials),
+        "relevant": processed,
+        "irrelevant": newly_irrelevant,
+        "fetch_errors": fetch_errors,
+        "classify_errors": classify_errors,
+    })
 
     logger.info(
         "Ingestion complete: %d new, %d updated, %d re-evaluated | "

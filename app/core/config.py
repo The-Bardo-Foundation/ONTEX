@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -17,8 +18,15 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///./ontex.db"
     OPENAI_API_KEY: str = "Not Set"
     ADMIN_USERNAME: str = "admin"
-    ADMIN_PASSWORD: str = "password"
+    ADMIN_PASSWORD: Optional[str] = None  # Must be set via environment variable in production
     ENVIRONMENT: str = "local"  # local, staging, production
+
+    # CORS: comma-separated list of allowed origins for the API.
+    # Override via ALLOWED_ORIGINS env var in production.
+    ALLOWED_ORIGINS: list[str] = [
+        "http://localhost:5173",
+        "http://localhost:3000",
+    ]
 
     # Ingestion pipeline settings
     # SEARCH_TERMS can be overridden via env var as JSON: SEARCH_TERMS='["osteosarcoma","bone sarcoma"]'

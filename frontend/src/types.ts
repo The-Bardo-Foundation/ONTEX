@@ -5,6 +5,9 @@ export interface TrialListItem {
   nct_id: string;
   brief_title: string;
   phase: string | null;
+  overall_status: string | null;
+  brief_summary: string | null;
+  custom_brief_summary: string | null;
   status: TrialStatus;
   ingestion_event: IngestionEvent | null;
   last_update_post_date: string | null;
@@ -75,7 +78,6 @@ export interface TrialsListResponse {
 }
 
 export interface ApproveBody {
-  username: string;
   reviewer_notes?: string;
   custom_brief_title?: string;
   custom_brief_summary?: string;
@@ -96,8 +98,7 @@ export interface ApproveBody {
 }
 
 export interface RejectBody {
-  username: string;
   reviewer_notes?: string;
 }
 
-export type CustomEdits = Partial<Omit<ApproveBody, 'username' | 'reviewer_notes'>>;
+export type CustomEdits = Partial<Omit<ApproveBody, 'reviewer_notes'>>;

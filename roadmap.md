@@ -6,7 +6,7 @@
 
 ## Current State
 
-Phases 1–3 complete. The ingestion pipeline is fully operational, the test suite is comprehensive, and the admin dashboard has a proper review queue and trials library.
+Phases 1–3 complete; Phase 4 in progress. The ingestion pipeline is fully operational, the test suite is comprehensive, and the admin dashboard now sits behind Clerk authentication with a separate public-facing viewer.
 
 ### Done
 - Database schema (`clinical_trials` and `irrelevant_trials` tables, dual-field `official` + `custom_*` pattern)
@@ -19,23 +19,38 @@ Phases 1–3 complete. The ingestion pipeline is fully operational, the test sui
 - **Full ingestion pipeline** (`ingestion.py`) — Steps 1–7 implemented end-to-end, with `ingestion_event` (NEW/UPDATED) and `previous_official_snapshot` support
 - Migration `004_phase3_review_queue` — adds `ingestion_event`, `reviewer_notes`, `rejected_at/by`, `previous_official_snapshot`
 - FastAPI backend with full review queue API:
-  - `GET /api/v1/trials/review-queue` — pending trials with ingestion_event
+  - `GET /api/v1/trials/review-queue` — pending trials with ingestion_event (auth-protected)
   - `GET /api/v1/trials/{nct_id}` — full trial detail
-  - `PATCH /api/v1/trials/{nct_id}/approve` — approve with notes and custom field edits
-  - `PATCH /api/v1/trials/{nct_id}/reject` — reject with notes
+  - `PATCH /api/v1/trials/{nct_id}/approve` — approve with notes and custom field edits (auth-protected)
+  - `PATCH /api/v1/trials/{nct_id}/reject` — reject with notes (auth-protected)
   - `GET /api/v1/trials` — paginated list with search (`q=`), filters, sort
+  - `GET /api/v1/ingestion/run-stream` — SSE endpoint: starts ingestion and streams per-step progress events
 - SQLAdmin panel for manual trial management
-- **Admin frontend** (React + Tailwind + React Router v6):
-  - Review Queue page (`/`) — sidebar list with NEW/UPDATED badges, AI classification card, official vs custom field comparison, diff view for updated trials, approve/reject with notes
-  - All Trials page (`/trials`) — paginated table with search, status/event/sort filters
-  - Trial Detail page (`/trials/:nct_id`) — full detail with approve/reject for pending trials
+- **Clerk authentication** (`@clerk/clerk-react`):
+  - `ClerkProvider` wraps the entire app in `main.tsx`
+  - `ProtectedRoute` component guards all `/admin/*` routes
+  - Axios interceptor automatically attaches Bearer token to protected API calls
+  - `UserButton` in admin sidebar, `SignInButton` in public nav
+  - Backend JWT middleware (`app/api/middleware.py`) verifies Clerk JWTs on protected endpoints (skipped in local/test environment)
+- **Public-facing viewer** (no login required):
+  - Landing page (`/`) — Bardo + Osteosarcoma logos, description, "Search Trials" CTA
+  - Trials search page (`/trials`) — APPROVED trials only, searchable, read-only
+  - Trial detail page (`/trials/:nct_id`) — read-only; shows approve/reject controls only when signed in
+- **Admin dashboard** (protected, requires Clerk login):
+  - Review Queue (`/admin`) — same sidebar queue + detail view as Phase 3
+  - All Trials (`/admin/trials`) — all statuses visible, full status/event filters
+  - Ingestion progress modal — step-by-step progress bars via SSE, shows counts per step
+- `approved_by`/`rejected_by` pulled from Clerk `user.primaryEmailAddress` (was hardcoded to `"admin"`)
 - 53 tests passing (API, ingestion pipeline, AI services)
 - APScheduler running ingestion on configurable schedule (default 24 h)
 - Development environment (Docker/SQLite), Railway deployment, GitHub Actions CI
 
-### Not done
-- Authentication and user management (Phase 4)
-- `approved_by`/`rejected_by` currently hardcoded to `"admin"` — will be wired to auth in Phase 4
+### Not done / next steps
+- Phase 4: Add `CLERK_PUBLISHABLE_KEY` to backend env config (currently hardcoded in `middleware.py`)
+- Phase 4: Clerk invite flow for additional reviewers (lower priority — single admin for now)
+- Phase 4: Role-based access (Admin vs. Reviewer) — can be stored as Clerk public metadata
+- Phase 5: `config.yaml` for search terms and schedule management
+- Phase 6: Verify WordPress PHP template integration end-to-end
 
 ---
 
@@ -204,30 +219,31 @@ A separate **All Trials** page (existing Approved/Rejected tabs):
 
 ---
 
-### Phase 4 — Authentication and user management
+### Phase 4 — Authentication and user management ✅ (in progress)
 
-#### 4.1 Authentication provider
+**Auth provider: Clerk** (`pk_test_*` key in `frontend/.env.local`)
 
-Use a free, pre-built auth service — recommended options:
+#### Completed in Phase 4
 
-- **Clerk** (free tier is generous, excellent React SDK, invite-based team management built in)
+- `@clerk/clerk-react` installed and wired via `ClerkProvider` in `main.tsx`
+- `ProtectedRoute` component: redirects unauthenticated users to `/sign-in`
+- Public routes: `/`, `/trials`, `/trials/:nct_id` (read-only, APPROVED only)
+- Protected routes: `/admin` (review queue), `/admin/trials` (all trials)
+- `UserButton` in admin sidebar, `SignInButton` in public nav
+- Axios Bearer token interceptor (`setTokenProvider`) in `api.ts`
+- Backend JWT middleware (`app/api/middleware.py`): verifies Clerk RS256 JWTs, JWKS cached 1 hour, skips in `ENVIRONMENT=local` so tests still pass
+- Protected endpoints: `GET /review-queue`, `PATCH /approve`, `PATCH /reject`
+- `approved_by`/`rejected_by` now uses Clerk `user.primaryEmailAddress`
+- Ingestion pipeline progress tracking added (`progress_callback` parameter)
+- New SSE endpoint `GET /api/v1/ingestion/run-stream` — streams step-by-step progress
+- `IngestionProgressModal` component with per-step progress bars and final summary
 
-The choice should prioritise: free tier with invite-based user management, a React SDK, and JWT-based API auth that FastAPI can verify.
+#### Remaining in Phase 4
 
-#### 4.2 What needs to be implemented
-
-- Protect all `/api/v1/*` endpoints — require a valid JWT from the auth provider
-- Add auth middleware to FastAPI (verify JWT signature using the provider's public key)
-- Update the React frontend to show a login page and include the auth token in all API requests
-- Admin user creates an account; additional reviewers are invited by email via the auth provider's invite flow
-- No custom user table needed — the auth provider handles user records
-
-#### 4.3 Roles (minimal)
-
-- **Admin** — can approve, reject, edit custom fields, invite other users, change config
-- **Reviewer** — can approve and reject, can write notes, cannot invite or change config
-
-Role can be stored as a claim in the JWT or in a small `user_roles` table.
+- Move Clerk publishable key from hardcoded value in `middleware.py` to `CLERK_PUBLISHABLE_KEY` env var in `app/core/config.py`
+- Test sign-in flow end-to-end in staging environment
+- Clerk invite flow for additional reviewers (lower priority)
+- Role-based access control (Admin vs. Reviewer) via Clerk public metadata
 
 ---
 

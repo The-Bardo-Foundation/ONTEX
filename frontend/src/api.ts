@@ -13,13 +13,40 @@ export const api = axios.create({
   baseURL: API_URL,
 });
 
+// Token provider set by the ClerkProvider wrapper in App.tsx so the axios
+// instance can attach Bearer tokens to protected requests without every
+// component needing to handle auth.
+let _getToken: (() => Promise<string | null>) | null = null;
+
+export function setTokenProvider(getToken: () => Promise<string | null>): void {
+  _getToken = getToken;
+}
+
+api.interceptors.request.use(async (config) => {
+  if (_getToken) {
+    const token = await _getToken();
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  }
+  return config;
+});
+
 export interface GetTrialsParams {
   status?: string;
   q?: string;
   ingestion_event?: string;
+  phase?: string;
+  recruiting_status?: string;
+  country?: string;
+  age_group?: string;
   sort_by?: string;
   page?: number;
   page_size?: number;
+}
+
+export interface TrialFacets {
+  countries: string[];
 }
 
 export const getReviewQueue = async (): Promise<TrialListItem[]> => {
@@ -37,6 +64,11 @@ export const getTrials = async (params: GetTrialsParams = {}): Promise<TrialsLis
   return response.data;
 };
 
+export const getTrialFacets = async (): Promise<TrialFacets> => {
+  const response = await api.get<TrialFacets>('/trials/facets');
+  return response.data;
+};
+
 export const approveTrial = async (nct_id: string, body: ApproveBody): Promise<TrialDetail> => {
   const response = await api.patch<TrialDetail>(`/trials/${nct_id}/approve`, body);
   return response.data;
@@ -44,10 +76,5 @@ export const approveTrial = async (nct_id: string, body: ApproveBody): Promise<T
 
 export const rejectTrial = async (nct_id: string, body: RejectBody): Promise<TrialDetail> => {
   const response = await api.patch<TrialDetail>(`/trials/${nct_id}/reject`, body);
-  return response.data;
-};
-
-export const runIngestion = async (): Promise<{ status: string }> => {
-  const response = await api.post<{ status: string }>('/debug/run-ingestion');
   return response.data;
 };

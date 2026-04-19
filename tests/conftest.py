@@ -24,6 +24,7 @@ def pytest_configure(config):
     os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
     os.environ["OPENAI_API_KEY"] = "sk-test-not-real"
     os.environ["SKIP_MIGRATIONS"] = "1"
+    os.environ["SKIP_AUTH_FOR_TESTS"] = "1"
 
 # Ensure repository root is on sys.path so `import app` works in CI
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
