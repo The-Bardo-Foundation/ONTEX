@@ -5,7 +5,7 @@ from pathlib import Path
 
 from alembic.config import Config
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -123,21 +123,27 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Osteosarcoma Clinical Trial Explorer", lifespan=lifespan)
 
-# CORS configuration
-origins = [
-    "http://localhost:5173",  # Vite dev server
-    "http://localhost:3000",
-    "https://my-railway-url.app",  # Replace with actual domain if known
-    "*",  # Allow all for simplicity in this context, refine for production
-]
-
+# CORS configuration — never allow wildcard with credentials.
+# Add production domains to ALLOWED_ORIGINS in your environment config.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=settings.ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if request.url.scheme == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
 
 # Setup Admin
 admin = Admin(app, engine)
@@ -145,16 +151,6 @@ admin.add_view(ClinicalTrialAdmin)
 
 # Include API Router
 app.include_router(api_router, prefix="/api/v1")
-
-
-@app.post("/api/v1/debug/run-ingestion")
-async def debug_ingestion():
-    # Import dynamically so tests can monkeypatch
-    # `app.services.ingestion.run_daily_ingestion`
-    import app.services.ingestion as ingestion
-
-    await ingestion.run_daily_ingestion()
-    return {"status": "started"}
 
 
 # Mount static files

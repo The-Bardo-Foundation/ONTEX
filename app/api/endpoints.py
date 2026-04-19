@@ -1,8 +1,13 @@
+import asyncio
+import json
+import re
 from datetime import datetime
-from typing import List, Optional
+from typing import AsyncGenerator, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field
+from app.api.middleware import clerk_user, optional_clerk_user
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,6 +16,23 @@ from app.db.models import ClinicalTrial, IngestionEvent, TrialStatus
 
 router = APIRouter()
 
+# PostgreSQL advisory lock ID used to prevent concurrent ingestion runs across
+# multiple workers/replicas. This replaces the previous in-memory process-local
+# flag, which could not coordinate across processes.
+_INGESTION_ADVISORY_LOCK_ID = 807_531_204_991
+
+
+async def _try_acquire_ingestion_lock(db: AsyncSession) -> bool:
+    result = await db.execute(
+        select(func.pg_try_advisory_lock(_INGESTION_ADVISORY_LOCK_ID))
+    )
+    return bool(result.scalar())
+
+
+async def _release_ingestion_lock(db: AsyncSession) -> None:
+    await db.execute(
+        select(func.pg_advisory_unlock(_INGESTION_ADVISORY_LOCK_ID))
+    )
 # ──────────────────────────────────────────────────────────────────────────────
 # Pydantic models
 # ──────────────────────────────────────────────────────────────────────────────
@@ -37,6 +59,9 @@ class TrialListItem(BaseModel):
     nct_id: str
     brief_title: str
     phase: Optional[str]
+    overall_status: Optional[str]
+    brief_summary: Optional[str]
+    custom_brief_summary: Optional[str]
     status: TrialStatus
     ingestion_event: Optional[IngestionEvent]
     last_update_post_date: Optional[str]
@@ -113,7 +138,7 @@ _CUSTOM_FIELDS = [
 
 
 class ApproveBody(BaseModel):
-    username: str = Field(min_length=1)
+    username: Optional[str] = None  # Ignored server-side; kept for API backwards-compat
     reviewer_notes: Optional[str] = None
     # All editable fields the reviewer may have updated in the review panel
     custom_brief_title: Optional[str] = None
@@ -135,7 +160,7 @@ class ApproveBody(BaseModel):
 
 
 class RejectBody(BaseModel):
-    username: str = Field(min_length=1)
+    username: Optional[str] = None  # Ignored server-side; kept for API backwards-compat
     reviewer_notes: Optional[str] = None
 
 
@@ -195,8 +220,48 @@ class PhpTrialResponse(BaseModel):
 # so FastAPI does not match the literal "review-queue" as a path parameter.
 # ──────────────────────────────────────────────────────────────────────────────
 
+class TrialFacets(BaseModel):
+    countries: List[str]
+
+
+@router.get("/trials/facets", response_model=TrialFacets)
+async def get_trial_facets(db: AsyncSession = Depends(get_db)):
+    """
+    Return distinct filterable values from approved trials.
+
+    - countries: sorted list of individual country names (split from comma-joined location_country)
+    """
+    country_field = func.coalesce(
+        ClinicalTrial.custom_location_country,
+        ClinicalTrial.location_country,
+    )
+    stmt = (
+        select(country_field)
+        .where(
+            ClinicalTrial.status == TrialStatus.APPROVED,
+            country_field.isnot(None),
+        )
+        .distinct()
+    )
+    result = await db.execute(stmt)
+    raw_countries = [row[0] for row in result.fetchall()]
+
+    # location_country may be comma-joined (e.g. "United States, Norway")
+    unique: set[str] = set()
+    for entry in raw_countries:
+        for country in entry.split(","):
+            country = country.strip()
+            if country:
+                unique.add(country)
+
+    return TrialFacets(countries=sorted(unique))
+
+
 @router.get("/trials/review-queue", response_model=List[TrialListItem])
-async def get_review_queue(db: AsyncSession = Depends(get_db)):
+async def get_review_queue(
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Return all PENDING_REVIEW trials, ordered by last update date."""
     stmt = (
         select(ClinicalTrial)
@@ -207,14 +272,59 @@ async def get_review_queue(db: AsyncSession = Depends(get_db)):
     return result.scalars().all()
 
 
+_RECRUITING_NOW = ["RECRUITING"]
+_NOT_RECRUITING = ["NOT_YET_RECRUITING", "ACTIVE_NOT_RECRUITING", "ENROLLING_BY_INVITATION"]
+_FINISHED = ["COMPLETED", "TERMINATED", "WITHDRAWN", "SUSPENDED"]
+
+# ── Age filtering helpers ──────────────────────────────────────────────────────
+# minimum_age / maximum_age are free-text strings from ClinicalTrials.gov,
+# e.g. "18 Years", "6 Months", "N/A". We parse them in Python because SQLite
+# cannot reliably extract numbers from arbitrary strings.
+
+def _parse_age_years(age_str: Optional[str]) -> Optional[float]:
+    """Return age in years, or None if unknown / N/A (meaning no restriction)."""
+    if not age_str or age_str.strip().upper() in ("N/A", ""):
+        return None
+    m = re.match(r"(\d+(?:\.\d+)?)\s*(year|month|week|day)", age_str.strip(), re.IGNORECASE)
+    if not m:
+        return None
+    value = float(m.group(1))
+    unit = m.group(2).lower()
+    if unit.startswith("month"):
+        value /= 12
+    elif unit.startswith("week"):
+        value /= 52
+    elif unit.startswith("day"):
+        value /= 365
+    return value
+
+
+def _matches_age_group(trial: "ClinicalTrial", age_group: str) -> bool:
+    """Return True if a person in the given age group is eligible for this trial."""
+    min_age = _parse_age_years(trial.minimum_age)   # None = no lower bound
+    max_age = _parse_age_years(trial.maximum_age)   # None = no upper bound
+    if age_group == "child":        # under-18 eligible
+        return (min_age is None or min_age < 18) and (max_age is None or max_age >= 1)
+    if age_group == "adult":        # 18–64 eligible
+        return (min_age is None or min_age <= 64) and (max_age is None or max_age >= 18)
+    if age_group == "older_adult":  # 65+ eligible
+        return (min_age is None or min_age <= 65) and (max_age is None or max_age >= 65)
+    return True
+
+
 @router.get("/trials", response_model=TrialsListResponse)
 async def get_trials(
     status: Optional[TrialStatus] = None,
     q: Optional[str] = None,
     ingestion_event: Optional[IngestionEvent] = None,
+    phase: Optional[str] = None,
+    recruiting_status: Optional[str] = None,
+    country: Optional[str] = None,
+    age_group: Optional[str] = None,
     sort_by: Optional[str] = None,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    clerk_user_claims: Optional[dict] = Depends(optional_clerk_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -223,15 +333,33 @@ async def get_trials(
     - q: case-insensitive search across brief_title, brief_summary, eligibility_criteria
     - status: filter by PENDING_REVIEW / APPROVED / REJECTED
     - ingestion_event: filter by NEW / UPDATED
+    - phase: substring match on phase field (e.g. "PHASE1" matches "PHASE1" and "PHASE1_PHASE2")
+    - recruiting_status: "recruiting" | "not_recruiting" | "finished"
+    - country: substring match on location_country (handles comma-joined multi-country values)
+    - age_group: "child" | "adult" | "older_adult" — Python-side filter (age strings can't be compared in SQL)
     - sort_by: "last_update_post_date" (default, desc) or "brief_title" (asc)
     - page / page_size: 1-based pagination
     """
     stmt = select(ClinicalTrial)
+    is_authenticated = clerk_user_claims is not None
 
-    if status:
+    if not is_authenticated:
+        stmt = stmt.where(ClinicalTrial.status == TrialStatus.APPROVED)
+    elif status:
         stmt = stmt.where(ClinicalTrial.status == status)
-    if ingestion_event:
+
+    if ingestion_event and is_authenticated:
         stmt = stmt.where(ClinicalTrial.ingestion_event == ingestion_event)
+    if phase:
+        stmt = stmt.where(ClinicalTrial.phase.ilike(f"%{phase}%"))
+    if recruiting_status == "recruiting":
+        stmt = stmt.where(ClinicalTrial.overall_status.in_(_RECRUITING_NOW))
+    elif recruiting_status == "not_recruiting":
+        stmt = stmt.where(ClinicalTrial.overall_status.in_(_NOT_RECRUITING))
+    elif recruiting_status == "finished":
+        stmt = stmt.where(ClinicalTrial.overall_status.in_(_FINISHED))
+    if country:
+        stmt = stmt.where(ClinicalTrial.location_country.ilike(f"%{country}%"))
     if q:
         stmt = stmt.where(
             or_(
@@ -241,21 +369,26 @@ async def get_trials(
             )
         )
 
-    # Count total before pagination
-    count_stmt = select(func.count()).select_from(stmt.subquery())
-    total = await db.scalar(count_stmt)
-
     # Sort
     if sort_by == "brief_title":
         stmt = stmt.order_by(ClinicalTrial.brief_title.asc())
     else:
         stmt = stmt.order_by(ClinicalTrial.last_update_post_date.desc())
 
-    # Paginate
-    stmt = stmt.offset((page - 1) * page_size).limit(page_size)
-
-    result = await db.execute(stmt)
-    items = result.scalars().all()
+    if age_group:
+        # Age strings can't be compared reliably in SQL — fetch all matches and
+        # filter + paginate in Python. Fine for the small trial sets we have.
+        result = await db.execute(stmt)
+        all_items = [t for t in result.scalars().all() if _matches_age_group(t, age_group)]
+        total = len(all_items)
+        items = all_items[(page - 1) * page_size : page * page_size]
+    else:
+        # Standard DB-level count + paginate
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        total = await db.scalar(count_stmt)
+        stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+        result = await db.execute(stmt)
+        items = result.scalars().all()
 
     return TrialsListResponse(items=items, total=total or 0, page=page, page_size=page_size)
 
@@ -321,7 +454,12 @@ async def get_trial(nct_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.patch("/trials/{nct_id}/approve", response_model=TrialDetail)
-async def approve_trial(nct_id: str, body: ApproveBody, db: AsyncSession = Depends(get_db)):
+async def approve_trial(
+    nct_id: str,
+    body: ApproveBody,
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
     """
     Approve a trial.  Sets status=APPROVED, records approved_by/approved_at,
     and applies any custom field edits submitted alongside the approval.
@@ -334,7 +472,7 @@ async def approve_trial(nct_id: str, body: ApproveBody, db: AsyncSession = Depen
 
     trial.status = TrialStatus.APPROVED
     trial.approved_at = datetime.utcnow()
-    trial.approved_by = body.username
+    trial.approved_by = _user.get("email") or _user.get("sub")
     trial.reviewer_notes = body.reviewer_notes
 
     for field in _CUSTOM_FIELDS:
@@ -348,7 +486,12 @@ async def approve_trial(nct_id: str, body: ApproveBody, db: AsyncSession = Depen
 
 
 @router.patch("/trials/{nct_id}/reject", response_model=TrialDetail)
-async def reject_trial(nct_id: str, body: RejectBody, db: AsyncSession = Depends(get_db)):
+async def reject_trial(
+    nct_id: str,
+    body: RejectBody,
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Reject a trial.  Sets status=REJECTED and records rejected_by/rejected_at."""
     stmt = select(ClinicalTrial).where(ClinicalTrial.nct_id == nct_id)
     result = await db.execute(stmt)
@@ -358,7 +501,7 @@ async def reject_trial(nct_id: str, body: RejectBody, db: AsyncSession = Depends
 
     trial.status = TrialStatus.REJECTED
     trial.rejected_at = datetime.utcnow()
-    trial.rejected_by = body.username
+    trial.rejected_by = _user.get("email") or _user.get("sub")
     trial.reviewer_notes = body.reviewer_notes
 
     await db.commit()
@@ -388,3 +531,64 @@ async def update_trial(
     await db.commit()
     await db.refresh(trial)
     return trial
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Ingestion SSE endpoint
+# ──────────────────────────────────────────────────────────────────────────────
+
+@router.get("/ingestion/run-stream")
+async def run_ingestion_stream(
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Start the ingestion pipeline and stream progress events as Server-Sent Events.
+
+    Connects via EventSource; each event is a JSON object with a `step` field.
+    Only one ingestion run is allowed at a time — returns an error event if one
+    is already in progress. A `complete` step is emitted only on successful
+    completion; on failures, the stream ends after an `error` step.
+    """
+    async def event_stream() -> AsyncGenerator[str, None]:
+        lock_acquired = await _try_acquire_ingestion_lock(db)
+        if not lock_acquired:
+            yield f"data: {json.dumps({'step': 'error', 'message': 'Ingestion already running'})}\n\n"
+            return
+
+        queue: asyncio.Queue[Optional[dict]] = asyncio.Queue()
+
+        async def progress_callback(event: dict) -> None:
+            await queue.put(event)
+
+        async def run_and_signal() -> None:
+            try:
+                import app.services.ingestion as ingestion
+                await ingestion.run_daily_ingestion(progress_callback=progress_callback)
+            except Exception as exc:
+                await queue.put({"step": "error", "message": str(exc)})
+            else:
+                await queue.put({"step": "complete"})
+            finally:
+                await queue.put(None)  # sentinel
+
+        task = asyncio.create_task(run_and_signal())
+
+        try:
+            while True:
+                event = await queue.get()
+                if event is None:
+                    break
+                yield f"data: {json.dumps(event)}\n\n"
+        finally:
+            await _release_ingestion_lock(db)
+            task.cancel()
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
