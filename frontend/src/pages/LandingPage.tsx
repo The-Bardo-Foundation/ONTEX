@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 const CLASSIFICATION_SYSTEM_PROMPT = `You are a clinical trial relevance evaluator for the Osteosarcoma Now Foundation.
@@ -322,23 +322,82 @@ function ClassificationStep({ onShowPrompt }: { onShowPrompt: () => void }) {
 }
 
 function PromptModal({ onClose }: { onClose: () => void }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const previousFocusedElement = document.activeElement as HTMLElement | null;
+    closeButtonRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+
+      if (event.key !== 'Tab' || !dialogRef.current) {
+        return;
+      }
+
+      const focusableElements = dialogRef.current.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+
+      if (focusableElements.length === 0) {
+        event.preventDefault();
+        dialogRef.current.focus();
+        return;
+      }
+
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+      const activeElement = document.activeElement;
+
+      if (event.shiftKey && activeElement === firstElement) {
+        event.preventDefault();
+        lastElement.focus();
+      } else if (!event.shiftKey && activeElement === lastElement) {
+        event.preventDefault();
+        firstElement.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      previousFocusedElement?.focus();
+    };
+  }, [onClose]);
+
   return (
     <div
       className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"
       onClick={onClose}
+      aria-hidden="true"
     >
       <div
+        ref={dialogRef}
         className="relative bg-gray-900 rounded-xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl"
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="ai-system-prompt-title"
+        aria-describedby="ai-system-prompt-description"
+        tabIndex={-1}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-700">
           <div>
-            <p className="text-sm font-semibold text-white">AI System Prompt</p>
-            <p className="text-xs text-gray-400 mt-0.5">
+            <p id="ai-system-prompt-title" className="text-sm font-semibold text-white">
+              AI System Prompt
+            </p>
+            <p id="ai-system-prompt-description" className="text-xs text-gray-400 mt-0.5">
               Sent to the AI classification system before every trial classification
             </p>
           </div>
           <button
+            ref={closeButtonRef}
             onClick={onClose}
             className="text-gray-400 hover:text-white transition-colors text-xl leading-none"
             aria-label="Close"
