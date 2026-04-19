@@ -1,7 +1,7 @@
 """rename_confidence_to_label
 
 Revision ID: 003_rename_confidence_to_label
-Revises: 002_add_ai_classification_columns
+Revises: 004_phase3_review_queue
 Create Date: 2026-04-19
 
 Replaces ai_relevance_confidence (float 0-1) with ai_relevance_label (string).
@@ -19,7 +19,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "003_rename_confidence_to_label"
-down_revision: Union[str, None] = "002_add_ai_classification_columns"
+down_revision: Union[str, None] = "004_phase3_review_queue"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
