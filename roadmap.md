@@ -95,7 +95,7 @@ Create a new function `ai_generate_summaries(client, trial_data: dict) -> dict` 
 - Based on the result:
   - `is_relevant=True`: upsert into `clinical_trials` with `status=PENDING_REVIEW`
   - `is_relevant=False`: upsert into `irrelevant_trials` with `irrelevance_reason` set to the LLM's reason string
-- Store the `classification_result` object fields (`label`, `reason`, `relevance_tier`, `matching_criteria`) somewhere reviewable — columns on `clinical_trials`: `ai_relevance_label`, `ai_relevance_reason`, `ai_relevance_tier`, `ai_matching_criteria`
+- Store the `classification_result` object fields (`label`, `reason`, `matching_criteria`) somewhere reviewable — columns on `clinical_trials`: `ai_relevance_label`, `ai_relevance_reason`, `ai_matching_criteria`
 
 #### 1.5 Implement `ingestion.py` Step 6 — detect new vs. updated trials ✅
 
