@@ -31,10 +31,10 @@ interface StepDisplay {
 }
 
 const PIPELINE_STEPS = [
-  { id: 'searching',       label: 'Searching ClinicalTrials.gov' },
+  { id: 'searching',        label: 'Searching ClinicalTrials.gov' },
   { id: 'fetching_details', label: 'Fetching trial details' },
-  { id: 'summarizing',     label: 'Generating summaries' },
-  { id: 'classifying',     label: 'AI classification' },
+  { id: 'classifying',      label: 'AI classification' },
+  { id: 'summarizing',      label: 'Generating summaries' },
 ];
 
 // ── Component ─────────────────────────────────────────────────────────────────

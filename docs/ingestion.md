@@ -27,12 +27,13 @@ flowchart TD
     D -->|Irrelevant, same date| Z([Skip])
 
     E --> F[3.5 Preserve admin edits\nfor existing trials]
-    F --> G[4. AI summarise\ncustom_brief_summary]
-    G --> H[5. AI classify\nrelevance & tier]
-    H --> I{Relevant?}
+    F --> G[4. AI classify\nrelevance: confident / unsure / reject]
+    G --> I{Relevant?}
 
-    I -->|Yes| J[6a. Upsert → clinical_trials\nstatus: PENDING_REVIEW]
-    I -->|No| K[6b. Upsert → irrelevant_trials]
+    I -->|confident or unsure| H[5. AI summarise\ncustom_* fields]
+    I -->|reject| K[6b. Upsert → irrelevant_trials]
+
+    H --> J[6a. Upsert → clinical_trials\nstatus: PENDING_REVIEW]
 
     J --> L[7. Write IngestionRun\naudit row]
     K --> L
@@ -91,36 +92,35 @@ For trials already in the database (updated or re-evaluated), loads any non-null
 
 ---
 
-### Step 4 — AI summarise
+### Step 4 — AI classify
+
+**File:** [app/services/ai/classifier.py](../app/services/ai/classifier.py)
+
+Classifies whether the trial is relevant to osteosarcoma patients:
+
+| Label | Meaning |
+|-------|---------|
+| `confident` | Clearly relevant — proceeds to summarisation and review queue |
+| `unsure` | Possibly relevant — proceeds to summarisation and review queue |
+| `reject` | No osteosarcoma connection — written directly to `irrelevant_trials`, no summary generated |
+
+**Fail-safe:** classification errors default to `unsure` so the trial is included for manual review.
+
+- Temperature: 0.1
+- Retries: 2
+
+---
+
+### Step 5 — AI summarise (confident/unsure only)
 
 **File:** [app/services/ai/summarizer.py](../app/services/ai/summarizer.py)
 
-Calls OpenAI to generate `custom_brief_summary` — a 2–3 sentence plain-language description at an 8th-grade reading level.
+Only runs for trials that passed classification as `confident` or `unsure`. Generates patient-friendly `custom_*` fields at an 8th-grade reading level. Rejected trials skip this step entirely.
 
 - Model: `AI_MODEL` (default: `gpt-4o-mini`)
 - Temperature: 0.3
 - Retries: 2 (3 attempts total)
 - Failure: field left `None`; pipeline continues
-
----
-
-### Step 5 — AI classify
-
-**File:** [app/services/ai/classifier.py](../app/services/ai/classifier.py)
-
-Classifies whether the trial is relevant to osteosarcoma patients and assigns a tier:
-
-| Tier | Meaning |
-|------|---------|
-| `primary` | Osteosarcoma explicitly named |
-| `secondary` | Broader trial (bone sarcoma, solid tumor, pediatric) where osteosarcoma patients are eligible |
-| `irrelevant` | No osteosarcoma connection |
-
-**Fail-safe:** if confidence < `CONFIDENCE_THRESHOLD` (default: 0.7) and the model says irrelevant, the trial is forced to `secondary` with reason "Low confidence — included for human review". Missing a relevant trial is worse than a false positive.
-
-- Temperature: 0.1
-- Retries: 2
-- Exception: defaults to `is_relevant=True, confidence=0.0`
 
 ---
 
@@ -179,8 +179,8 @@ Schema: [app/db/models.py](../app/db/models.py)
 |------|---------|-----------|
 | 1 — Fetch index | API/network error | Ingestion aborted |
 | 3 — Fetch study | HTTP error or timeout | Trial skipped; `fetch_errors++` |
-| 4 — AI summarise | LLM error after retries | `custom_brief_summary = None`; pipeline continues |
-| 5 — AI classify | LLM error after retries | Defaults to `is_relevant=True`, `confidence=0.0`; logged as `classify_errors` |
+| 4 — AI classify | LLM error after retries | Defaults to `unsure`; logged as `classify_errors` |
+| 5 — AI summarise | LLM error after retries | `custom_*` fields left `None`; pipeline continues |
 | 6 — DB upsert | SQL error | Exception propagates; run aborted |
 
 ---
