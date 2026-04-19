@@ -182,6 +182,11 @@ async def serve_spa(full_path: str):
     if full_path.startswith("api"):
         return {"error": "API route not found"}
 
+    # Serve static root files (images, icons, etc.)
+    static_file = os.path.join(static_dir, full_path)
+    if os.path.isfile(static_file):
+        return FileResponse(static_file)
+
     # Serve index.html for SPA
     index_file = os.path.join(static_dir, "index.html")
     if os.path.exists(index_file):
