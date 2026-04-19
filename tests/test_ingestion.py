@@ -25,7 +25,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from app.db.database import Base
 from app.db.models import ClinicalTrial, IngestionEvent, IrrelevantTrial, TrialStatus
-from app.services.ai.schemas import ClassificationResult, ConfidenceLabel, RelevanceTier
+from app.services.ai.schemas import ClassificationResult, ConfidenceLabel
 from app.services.ctgov.study_detail import map_api_to_model
 
 
@@ -33,13 +33,11 @@ from app.services.ctgov.study_detail import map_api_to_model
 
 def make_classification(
     label: ConfidenceLabel = ConfidenceLabel.CONFIDENT,
-    tier: RelevanceTier = RelevanceTier.PRIMARY,
     reason: str = "osteosarcoma mentioned",
 ) -> ClassificationResult:
     return ClassificationResult(
         label=label,
         reason=reason,
-        relevance_tier=tier,
         matching_criteria=["osteosarcoma_in_conditions"],
     )
 
@@ -199,7 +197,7 @@ async def test_new_irrelevant_trial_stored_in_irrelevant_table(tmp_path, monkeyp
     )
     monkeypatch.setattr(
         "app.services.ingestion.classify_trial",
-        AsyncMock(return_value=make_classification(label=ConfidenceLabel.REJECT, tier=RelevanceTier.IRRELEVANT)),
+        AsyncMock(return_value=make_classification(label=ConfidenceLabel.REJECT)),
     )
 
     from app.services.ingestion import run_daily_ingestion
@@ -422,7 +420,7 @@ async def test_clinical_trial_reclassified_irrelevant_removes_clinical_row(tmp_p
     )
     monkeypatch.setattr(
         "app.services.ingestion.classify_trial",
-        AsyncMock(return_value=make_classification(label=ConfidenceLabel.REJECT, tier=RelevanceTier.IRRELEVANT)),
+        AsyncMock(return_value=make_classification(label=ConfidenceLabel.REJECT)),
     )
 
     from app.services.ingestion import run_daily_ingestion

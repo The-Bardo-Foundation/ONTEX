@@ -41,7 +41,7 @@ from app.db.database import SessionLocal
 from app.db.models import ClinicalTrial, IngestionEvent, IngestionRun, IrrelevantTrial, TrialStatus
 from app.services.ai.classifier import classify_trial
 from app.services.ai.client import AIClient
-from app.services.ai.schemas import ClassificationResult, ConfidenceLabel, RelevanceTier
+from app.services.ai.schemas import ClassificationResult, ConfidenceLabel
 from app.services.ai.summarizer import ai_generate_summaries
 from app.services.ctgov import iter_study_index_rows
 from app.services.ctgov.study_detail import fetch_full_study, map_api_to_model
@@ -327,7 +327,6 @@ async def run_daily_ingestion(
                 classification = ClassificationResult(
                     label=ConfidenceLabel.UNSURE,
                     reason=f"Classification error — needs manual review: {exc}",
-                    relevance_tier=RelevanceTier.SECONDARY,
                     matching_criteria=["none"],
                 )
 
@@ -341,7 +340,6 @@ async def run_daily_ingestion(
                     ingestion_event=event,
                     ai_relevance_label=classification.label.value,
                     ai_relevance_reason=classification.reason,
-                    ai_relevance_tier=classification.relevance_tier.value,
                     ai_matching_criteria=json.dumps(classification.matching_criteria),
                     previous_approved_at=approval_history.get("approved_at"),
                     previous_approved_by=approval_history.get("approved_by"),

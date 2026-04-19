@@ -18,13 +18,9 @@ Use "confident" if ANY of these apply:
   patients are eligible per the inclusion criteria
 - It is a Phase 1 trial where osteosarcoma patients could reasonably enroll
 
-Set relevance_tier to "primary" if osteosarcoma is explicitly named.
-Set relevance_tier to "secondary" if it is a broader trial where osteosarcoma fits.
-
 ## LABEL: "unsure"
 
 Use "unsure" if you are uncertain whether osteosarcoma patients could enroll.
-Set relevance_tier to "secondary".
 
 ## LABEL: "reject"
 
@@ -35,15 +31,12 @@ Use "reject" only if ALL of these apply:
 - Osteosarcoma only mentioned in background text, NOT in eligibility criteria
 - Trial is Withdrawn or Terminated
 
-Set relevance_tier to "irrelevant".
-
 ## OUTPUT FORMAT
 
 Return ONLY valid JSON:
 {
   "label": "confident",
   "reason": "1-2 sentence justification",
-  "relevance_tier": "primary",
   "matching_criteria": ["osteosarcoma_in_conditions"]
 }
 

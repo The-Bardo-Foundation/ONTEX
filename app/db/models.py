@@ -89,7 +89,6 @@ class ClinicalTrial(ClinicalTrialBase, Base):
     # ai_matching_criteria is stored as a JSON string (json.dumps / json.loads at app layer)
     ai_relevance_label: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     ai_relevance_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    ai_relevance_tier: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     ai_matching_criteria: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Approval tracking — set by PATCH /approve endpoint, preserved across re-ingestions

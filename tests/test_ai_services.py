@@ -9,7 +9,7 @@ AIClient.__init__ doesn't raise before we can mock _client.
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from app.services.ai.schemas import ClassificationResult, ConfidenceLabel, RelevanceTier
+from app.services.ai.schemas import ClassificationResult, ConfidenceLabel
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -32,7 +32,6 @@ def _classification(**kwargs) -> ClassificationResult:
     defaults = dict(
         label=ConfidenceLabel.CONFIDENT,
         reason="osteosarcoma mentioned",
-        relevance_tier=RelevanceTier.PRIMARY,
         matching_criteria=["osteosarcoma_in_conditions"],
     )
     defaults.update(kwargs)
@@ -102,13 +101,12 @@ async def test_classify_trial_confident_returned_unchanged():
 
     mock_client = MagicMock()
     mock_client.classify_trial = AsyncMock(
-        return_value=_classification(label=ConfidenceLabel.CONFIDENT, relevance_tier=RelevanceTier.PRIMARY)
+        return_value=_classification(label=ConfidenceLabel.CONFIDENT)
     )
 
     result = await classify_trial(mock_client, _trial())
 
     assert result.label == ConfidenceLabel.CONFIDENT
-    assert result.relevance_tier == RelevanceTier.PRIMARY
 
 
 @pytest.mark.asyncio
@@ -117,17 +115,12 @@ async def test_classify_trial_reject_returned_unchanged():
 
     mock_client = MagicMock()
     mock_client.classify_trial = AsyncMock(
-        return_value=_classification(
-            label=ConfidenceLabel.REJECT,
-            relevance_tier=RelevanceTier.IRRELEVANT,
-            matching_criteria=["none"],
-        )
+        return_value=_classification(label=ConfidenceLabel.REJECT, matching_criteria=["none"])
     )
 
     result = await classify_trial(mock_client, _trial())
 
     assert result.label == ConfidenceLabel.REJECT
-    assert result.relevance_tier == RelevanceTier.IRRELEVANT
 
 
 @pytest.mark.asyncio
@@ -139,7 +132,6 @@ async def test_classify_trial_unsure_goes_to_review():
         return_value=_classification(
             label=ConfidenceLabel.UNSURE,
             reason="uncertain eligibility",
-            relevance_tier=RelevanceTier.SECONDARY,
             matching_criteria=["none"],
         )
     )
@@ -147,7 +139,6 @@ async def test_classify_trial_unsure_goes_to_review():
     result = await classify_trial(mock_client, _trial())
 
     assert result.label == ConfidenceLabel.UNSURE
-    assert result.relevance_tier == RelevanceTier.SECONDARY
 
 
 # ─── Section C: AIClient fail-safe behavior (client.py) ──────────────────────
@@ -180,14 +171,13 @@ async def test_ai_client_classify_trial_parses_json_on_success(ai_client):
     mock_response = MagicMock()
     mock_response.choices[0].message.content = (
         '{"label": "confident", "reason": "osteosarcoma",'
-        ' "relevance_tier": "primary", "matching_criteria": ["osteosarcoma_in_conditions"]}'
+        ' "matching_criteria": ["osteosarcoma_in_conditions"]}'
     )
     ai_client._client.chat.completions.create = AsyncMock(return_value=mock_response)
 
     result = await ai_client.classify_trial("sys", "user")
 
     assert result.label == ConfidenceLabel.CONFIDENT
-    assert result.relevance_tier == RelevanceTier.PRIMARY
 
 
 @pytest.mark.asyncio
