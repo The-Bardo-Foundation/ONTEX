@@ -326,7 +326,7 @@ function PromptModal({ onClose }: { onClose: () => void }) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    const previousFocusedElement = document.activeElement as HTMLElement | null;
+    const previousFocusedElement = document.activeElement;
     closeButtonRef.current?.focus();
 
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -341,7 +341,7 @@ function PromptModal({ onClose }: { onClose: () => void }) {
       }
 
       const focusableElements = dialogRef.current.querySelectorAll<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
       );
 
       if (focusableElements.length === 0) {
@@ -367,7 +367,9 @@ function PromptModal({ onClose }: { onClose: () => void }) {
 
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
-      previousFocusedElement?.focus();
+      if (previousFocusedElement instanceof HTMLElement) {
+        previousFocusedElement.focus();
+      }
     };
   }, [onClose]);
 
