@@ -12,6 +12,12 @@ RUN npm install
 # Copy source code
 COPY frontend/ ./
 
+# Build args for Vite (baked in at build time)
+ARG VITE_CLERK_PUBLISHABLE_KEY
+ARG VITE_API_URL
+ENV VITE_CLERK_PUBLISHABLE_KEY=$VITE_CLERK_PUBLISHABLE_KEY
+ENV VITE_API_URL=$VITE_API_URL
+
 # Build the app
 RUN npm run build
 
