@@ -41,6 +41,7 @@ from app.db.database import SessionLocal
 from app.db.models import ClinicalTrial, IngestionEvent, IngestionRun, IrrelevantTrial, TrialStatus
 from app.services.ai.classifier import classify_trial
 from app.services.ai.client import AIClient
+from app.services.ai.schemas import ClassificationResult, ConfidenceLabel
 from app.services.ai.summarizer import ai_generate_summaries
 from app.services.ctgov import iter_study_index_rows
 from app.services.ctgov.study_detail import fetch_full_study, map_api_to_model
@@ -323,16 +324,13 @@ async def run_daily_ingestion(
                 logger.error("classify_trial raised for %s: %s", nct_id, exc)
                 classify_errors += 1
                 # Fail-safe: include for manual review rather than silently skip
-                from app.services.ai.schemas import ClassificationResult, RelevanceTier
                 classification = ClassificationResult(
-                    is_relevant=True,
-                    confidence=0.0,
+                    label=ConfidenceLabel.UNSURE,
                     reason=f"Classification error — needs manual review: {exc}",
-                    relevance_tier=RelevanceTier.SECONDARY,
                     matching_criteria=["none"],
                 )
 
-            if classification.is_relevant:
+            if classification.label != ConfidenceLabel.REJECT:
                 approval_history = existing_approval_map.get(nct_id, {})
                 event = IngestionEvent.UPDATED if nct_id in updated_nct_ids else IngestionEvent.NEW
                 snapshot = existing_snapshot_map.get(nct_id)
@@ -340,9 +338,8 @@ async def run_daily_ingestion(
                     **trial_data,
                     status=TrialStatus.PENDING_REVIEW,
                     ingestion_event=event,
-                    ai_relevance_confidence=classification.confidence,
+                    ai_relevance_label=classification.label.value,
                     ai_relevance_reason=classification.reason,
-                    ai_relevance_tier=classification.relevance_tier.value,
                     ai_matching_criteria=json.dumps(classification.matching_criteria),
                     previous_approved_at=approval_history.get("approved_at"),
                     previous_approved_by=approval_history.get("approved_by"),

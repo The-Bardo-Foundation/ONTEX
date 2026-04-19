@@ -33,7 +33,6 @@ class Settings(BaseSettings):
     SEARCH_TERMS: list[str] = ["osteosarcoma"]
     INGESTION_SCHEDULE_HOURS: int = 24
     AI_MODEL: str = "openai/gpt-4o-mini"
-    CONFIDENCE_THRESHOLD: float = 0.7
     PAGE_SIZE: int = 100
 
     model_config = SettingsConfigDict(

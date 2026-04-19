@@ -14,7 +14,7 @@ Phases 1–3 complete; Phase 4 in progress. The ingestion pipeline is fully oper
 - ClinicalTrials.gov API v2 integration — trial index fetching (`study_index.py`) and trial detail fetching (`study_detail.py`)
 - LLM prompt templates for relevance classification and AI summarisation
 - OpenAI async client wrapper with retry logic and fail-safe behaviour
-- Relevance classifier (`classifier.py`) — fully wired, Pydantic v2, reads confidence threshold from config
+- Relevance classifier (`classifier.py`) — fully wired, Pydantic v2; AI returns discrete label (`confident`/`unsure`/`reject`) instead of a numeric confidence score
 - AI summariser (`summarizer.py`) — generates patient-friendly `custom_*` fields; fail-safe on LLM error
 - **Full ingestion pipeline** (`ingestion.py`) — Steps 1–7 implemented end-to-end, with `ingestion_event` (NEW/UPDATED) and `previous_official_snapshot` support
 - Migration `004_phase3_review_queue` — adds `ingestion_event`, `reviewer_notes`, `rejected_at/by`, `previous_official_snapshot`
@@ -95,7 +95,7 @@ Create a new function `ai_generate_summaries(client, trial_data: dict) -> dict` 
 - Based on the result:
   - `is_relevant=True`: upsert into `clinical_trials` with `status=PENDING_REVIEW`
   - `is_relevant=False`: upsert into `irrelevant_trials` with `irrelevance_reason` set to the LLM's reason string
-- Store the `classification_result` object fields (`confidence`, `reason`, `relevance_tier`, `matching_criteria`) somewhere reviewable — add columns to `clinical_trials` for `ai_relevance_confidence`, `ai_relevance_reason`, `ai_relevance_tier`, `ai_matching_criteria`
+- Store the `classification_result` object fields (`label`, `reason`, `matching_criteria`) somewhere reviewable — columns on `clinical_trials`: `ai_relevance_label`, `ai_relevance_reason`, `ai_matching_criteria`
 
 #### 1.5 Implement `ingestion.py` Step 6 — detect new vs. updated trials ✅
 
@@ -138,7 +138,7 @@ Create a new function `ai_generate_summaries(client, trial_data: dict) -> dict` 
 
 12 unit tests in `tests/test_ai_services.py`:
 - `ai_generate_summaries()`: success, LLM returns None (null dict), extra keys ignored
-- `classify_trial()`: relevant unchanged, irrelevant high-confidence unchanged, irrelevant low-confidence flipped to SECONDARY, no duplicate tags, threshold read from settings
+- `classify_trial()`: confident/unsure/reject labels returned unchanged; AIClient fail-safe returns `unsure` so no trial is silently lost
 - `AIClient`: JSON parse success for generate and classify, all-retries-exhausted returns None / safe default
 
 #### 2.3 API endpoint tests ✅
@@ -168,7 +168,7 @@ Add columns to `clinical_trials`:
 
 | Column | Type | Purpose |
 |---|---|---|
-| `ai_relevance_confidence` | Float | LLM confidence score (0–1) |
+| `ai_relevance_label` | String | LLM classification label: `confident`, `unsure`, or `reject` |
 | `ai_relevance_reason` | Text | LLM explanation for relevance decision |
 | `ai_relevance_tier` | String | e.g. "primary", "secondary" |
 | `ai_matching_criteria` | JSON/Text | List of matching criteria tags |
