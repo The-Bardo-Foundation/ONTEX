@@ -151,7 +151,7 @@ This agent does NOT fetch data, write to DB, or generate summaries.
 
 ## 6. LLM Configuration
 
-- Provider: OpenAI (via `OPENAI_API_KEY` in config)
-- Model: `gpt-4o-mini`
+- Provider: OpenRouter (via `OPENROUTER_API_KEY` in config)
+- Model: `openai/gpt-4o-mini`
 - Temperature: 0.1
 - Response format: JSON mode

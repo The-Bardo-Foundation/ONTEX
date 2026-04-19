@@ -2,7 +2,7 @@
 Unit tests for AI services: summarizer, classifier, and AIClient.
 
 All LLM calls are replaced by AsyncMock — no real OpenAI API calls are made.
-pytest_configure in conftest.py sets OPENAI_API_KEY to a dummy value so
+pytest_configure in conftest.py sets OPENROUTER_API_KEY to a dummy value so
 AIClient.__init__ doesn't raise before we can mock _client.
 """
 

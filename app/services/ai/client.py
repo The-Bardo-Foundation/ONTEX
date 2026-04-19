@@ -12,20 +12,23 @@ logger = logging.getLogger(__name__)
 
 class AIClient:
     def __init__(self, api_key: str | None = None, model: str | None = None):
-        resolved_api_key = api_key or settings.OPENAI_API_KEY
+        resolved_api_key = api_key or settings.OPENROUTER_API_KEY
         # Fail fast with a clear error if the API key is not configured properly.
         if (
             not resolved_api_key
             or not str(resolved_api_key).strip()
-            or "your_openai_api_key" in str(resolved_api_key).lower()
+            or "your_openrouter_api_key" in str(resolved_api_key).lower()
             or "changeme" in str(resolved_api_key).lower()
             or "not set" in str(resolved_api_key).lower()
         ):
             raise RuntimeError(
-                "OPENAI_API_KEY is not configured. Set a valid key in "
-                "settings.OPENAI_API_KEY or pass api_key to AIClient."
+                "OPENROUTER_API_KEY is not configured. Set a valid key in "
+                "settings.OPENROUTER_API_KEY or pass api_key to AIClient."
             )
-        self._client = AsyncOpenAI(api_key=resolved_api_key)
+        self._client = AsyncOpenAI(
+            api_key=resolved_api_key,
+            base_url="https://openrouter.ai/api/v1",
+        )
         self._model = model or settings.AI_MODEL
 
     async def generate_summaries(

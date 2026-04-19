@@ -151,7 +151,7 @@ Create a new function `ai_generate_summaries(client, trial_data: dict) -> dict` 
 
 #### 2.4 Test conventions
 
-- `pytest_configure` hook in `conftest.py` sets `DATABASE_URL=sqlite+aiosqlite:///:memory:`, `OPENAI_API_KEY=sk-test-not-real`, `SKIP_MIGRATIONS=1` before any app module is imported — fixes the module-level SQLAlchemy engine isolation issue
+- `pytest_configure` hook in `conftest.py` sets `DATABASE_URL=sqlite+aiosqlite:///:memory:`, `OPENROUTER_API_KEY=sk-test-not-real`, `SKIP_MIGRATIONS=1` before any app module is imported — fixes the module-level SQLAlchemy engine isolation issue
 - Tests use SQLite for isolation; the `db_engine` fixture uses a temporary database file under `tmp_path` rather than a shared in-memory database
 - LLM calls always mocked; no real OpenAI API calls in tests
 - Tests run in GitHub Actions CI on every push

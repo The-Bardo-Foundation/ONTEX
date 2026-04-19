@@ -191,7 +191,7 @@ Schema: [app/db/models.py](../app/db/models.py)
 |---------|---------|--------|
 | `SEARCH_TERMS` | `["osteosarcoma"]` | JSON list of CT.gov search terms |
 | `INGESTION_SCHEDULE_HOURS` | `24` | How often the scheduler fires |
-| `AI_MODEL` | `gpt-4o-mini` | OpenAI model for summarisation and classification |
+| `AI_MODEL` | `openai/gpt-4o-mini` | OpenRouter model for summarisation and classification |
 | `CONFIDENCE_THRESHOLD` | `0.7` | Min confidence below which irrelevant → forced secondary |
 | `PAGE_SIZE` | `100` | Results per CT.gov API page |
-| `OPENAI_API_KEY` | — | Required; app fails to start if missing |
+| `OPENROUTER_API_KEY` | — | Required; app fails to start if missing |

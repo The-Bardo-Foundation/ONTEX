@@ -267,7 +267,7 @@ async def run_daily_ingestion(
     # ──────────────────────────────────────────────────────────
     # STEP 4 — AI summarisation: populate custom_* fields
     # AIClient is instantiated once per run (one connection pool).
-    # If OPENAI_API_KEY is not set, AIClient raises RuntimeError here —
+    # If OPENROUTER_API_KEY is not set, AIClient raises RuntimeError here —
     # the ingestion run is aborted rather than silently writing null summaries.
     # ──────────────────────────────────────────────────────────
     ai_client = AIClient()
