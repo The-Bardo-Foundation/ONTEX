@@ -542,7 +542,9 @@ async def test_ingestion_run_stream_rejects_unauthenticated_when_auth_enabled(te
 async def test_ingestion_run_stream_returns_error_event_when_already_running(test_client, monkeypatch):
     import app.api.endpoints as endpoints
 
+    release_mock = AsyncMock(return_value=None)
     monkeypatch.setattr(endpoints, "_try_acquire_ingestion_lock", AsyncMock(return_value=False))
+    monkeypatch.setattr(endpoints, "_release_ingestion_lock", release_mock)
 
     r = await test_client.get(
         "/api/v1/ingestion/run-stream",
@@ -553,6 +555,7 @@ async def test_ingestion_run_stream_returns_error_event_when_already_running(tes
     assert len(events) == 1
     assert events[0]["step"] == "error"
     assert "already running" in events[0]["message"].lower()
+    release_mock.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -577,3 +580,26 @@ async def test_ingestion_run_stream_emits_progress_and_complete_events(test_clie
     steps = [event["step"] for event in events]
     assert "progress" in steps
     assert "complete" in steps
+
+
+@pytest.mark.asyncio
+async def test_ingestion_run_stream_emits_error_without_complete_on_failure(test_client, monkeypatch):
+    import app.api.endpoints as endpoints
+    import app.services.ingestion as ingestion
+
+    async def failing_run_daily_ingestion(progress_callback=None):
+        raise RuntimeError("ingestion failed")
+
+    monkeypatch.setattr(endpoints, "_try_acquire_ingestion_lock", AsyncMock(return_value=True))
+    monkeypatch.setattr(endpoints, "_release_ingestion_lock", AsyncMock(return_value=None))
+    monkeypatch.setattr(ingestion, "run_daily_ingestion", failing_run_daily_ingestion)
+
+    r = await test_client.get(
+        "/api/v1/ingestion/run-stream",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert r.status_code == 200
+    events = _parse_sse_events(r.text)
+    steps = [event["step"] for event in events]
+    assert "error" in steps
+    assert "complete" not in steps

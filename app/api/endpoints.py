@@ -547,7 +547,8 @@ async def run_ingestion_stream(
 
     Connects via EventSource; each event is a JSON object with a `step` field.
     Only one ingestion run is allowed at a time — returns an error event if one
-    is already in progress.
+    is already in progress. A `complete` step is emitted only on successful
+    completion; on failures, the stream ends after an `error` step.
     """
     async def event_stream() -> AsyncGenerator[str, None]:
         lock_acquired = await _try_acquire_ingestion_lock(db)
