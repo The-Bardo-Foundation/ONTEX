@@ -335,7 +335,7 @@ function PromptModal({ onClose }: { onClose: () => void }) {
           <div>
             <p className="text-sm font-semibold text-white">AI System Prompt</p>
             <p className="text-xs text-gray-400 mt-0.5">
-              Sent to Claude before every trial classification
+              Sent to the AI classification system before every trial classification
             </p>
           </div>
           <button
