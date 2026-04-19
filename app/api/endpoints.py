@@ -16,9 +16,23 @@ from app.db.models import ClinicalTrial, IngestionEvent, TrialStatus
 
 router = APIRouter()
 
-# In-memory flag to prevent concurrent ingestion runs
-_ingestion_running = False
+# PostgreSQL advisory lock ID used to prevent concurrent ingestion runs across
+# multiple workers/replicas. This replaces the previous in-memory process-local
+# flag, which could not coordinate across processes.
+_INGESTION_ADVISORY_LOCK_ID = 807_531_204_991
 
+
+async def _try_acquire_ingestion_lock(db: AsyncSession) -> bool:
+    result = await db.execute(
+        select(func.pg_try_advisory_lock(_INGESTION_ADVISORY_LOCK_ID))
+    )
+    return bool(result.scalar())
+
+
+async def _release_ingestion_lock(db: AsyncSession) -> None:
+    await db.execute(
+        select(func.pg_advisory_unlock(_INGESTION_ADVISORY_LOCK_ID))
+    )
 # ──────────────────────────────────────────────────────────────────────────────
 # Pydantic models
 # ──────────────────────────────────────────────────────────────────────────────
