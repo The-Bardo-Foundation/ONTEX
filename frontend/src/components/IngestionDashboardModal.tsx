@@ -62,6 +62,9 @@ export function IngestionDashboardModal({ onClose }: { onClose: () => void }) {
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const headersRef = useRef<Record<string, string>>({});
+  // True once this client has observed an in-progress run. Prevents showing
+  // a stale summary from a previous run when the modal first opens.
+  const sawRunningRef = useRef(false);
 
   // ── Auth headers ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -103,11 +106,13 @@ export function IngestionDashboardModal({ onClose }: { onClose: () => void }) {
         const data: LiveStatus = await res.json();
         setStatus(data);
 
-        if (data.error && !done) {
+        if (data.running) sawRunningRef.current = true;
+
+        if (data.error && !done && sawRunningRef.current) {
           clearInterval(intervalRef.current!);
           setErrorMsg(data.error);
           setDone(true);
-        } else if (data.summary && !done) {
+        } else if (data.summary && !done && sawRunningRef.current) {
           clearInterval(intervalRef.current!);
           setSummary(data.summary);
           setDone(true);
@@ -135,6 +140,9 @@ export function IngestionDashboardModal({ onClose }: { onClose: () => void }) {
     setErrorMsg(null);
     setSummary(null);
     setDone(false);
+    // Re-arm the gate so a stale summary from a previous run can't match
+    // before /start has cleared it on the backend.
+    sawRunningRef.current = false;
     try {
       const res = await fetch(`${API_URL}/ingestion/start`, {
         method: 'POST',
@@ -143,6 +151,12 @@ export function IngestionDashboardModal({ onClose }: { onClose: () => void }) {
       if (!res.ok && res.status !== 409) {
         setErrorMsg(`Failed to start: ${res.status}`);
         setDone(true);
+      } else {
+        // /start clears the backend summary before returning, so any
+        // non-null summary we see from here on belongs to this run —
+        // including sub-poll-tick runs that finish before we observe
+        // running=true.
+        sawRunningRef.current = true;
       }
     } catch {
       setErrorMsg('Could not reach server.');
