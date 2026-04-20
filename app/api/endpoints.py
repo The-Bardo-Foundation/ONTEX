@@ -654,6 +654,7 @@ async def start_ingestion(_user: dict = Depends(clerk_user)):
                 )
             except Exception as exc:
                 _ingestion_status["error"] = str(exc)
+            finally:
                 _ingestion_status["running"] = False
 
     asyncio.create_task(_run())
