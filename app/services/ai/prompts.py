@@ -134,7 +134,7 @@ patient-friendly field:
                                       trial is testing and why it matters to patients
 
 Rules:
-- Create a patient friendly summary for clinical trial [NCT ID].
+- Create a patient friendly summary for clinical trial {nct_id}.
 - Summarise Intervention Description, Title, Brief Summary and Key Information.
 - Retain any drug names in the summary
 - Never use unexplained medical abbreviations
