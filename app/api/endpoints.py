@@ -174,6 +174,18 @@ _CUSTOM_FIELDS = [
     "key_information",
 ]
 
+_BASE_FIELDS = [
+    "nct_id", "brief_title", "custom_brief_title", "brief_summary", "custom_brief_summary",
+    "overall_status", "custom_overall_status", "phase", "custom_phase", "study_type",
+    "custom_study_type", "location_country", "custom_location_country", "location_city",
+    "custom_location_city", "minimum_age", "custom_minimum_age", "maximum_age",
+    "custom_maximum_age", "central_contact_name", "custom_central_contact_name",
+    "central_contact_phone", "custom_central_contact_phone", "central_contact_email",
+    "custom_central_contact_email", "eligibility_criteria", "custom_eligibility_criteria",
+    "intervention_description", "custom_intervention_description", "key_information",
+    "last_update_post_date", "custom_last_update_post_date",
+]
+
 
 class ApproveBody(BaseModel):
     username: Optional[str] = None  # Ignored server-side; kept for API backwards-compat
@@ -200,6 +212,48 @@ class ApproveBody(BaseModel):
 class RejectBody(BaseModel):
     username: Optional[str] = None  # Ignored server-side; kept for API backwards-compat
     reviewer_notes: Optional[str] = None
+
+
+class MarkIrrelevantBody(BaseModel):
+    irrelevance_reason: Optional[str] = None
+
+
+class IrrelevantTrialDetail(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    nct_id: str
+    brief_title: str
+    brief_summary: Optional[str]
+    overall_status: Optional[str]
+    phase: Optional[str]
+    study_type: Optional[str]
+    location_country: Optional[str]
+    location_city: Optional[str]
+    minimum_age: Optional[str]
+    maximum_age: Optional[str]
+    central_contact_name: Optional[str]
+    central_contact_phone: Optional[str]
+    central_contact_email: Optional[str]
+    eligibility_criteria: Optional[str]
+    intervention_description: Optional[str]
+    key_information: Optional[str]
+    last_update_post_date: Optional[str]
+    custom_brief_title: Optional[str]
+    custom_brief_summary: Optional[str]
+    custom_overall_status: Optional[str]
+    custom_phase: Optional[str]
+    custom_study_type: Optional[str]
+    custom_location_country: Optional[str]
+    custom_location_city: Optional[str]
+    custom_minimum_age: Optional[str]
+    custom_maximum_age: Optional[str]
+    custom_central_contact_name: Optional[str]
+    custom_central_contact_phone: Optional[str]
+    custom_central_contact_email: Optional[str]
+    custom_eligibility_criteria: Optional[str]
+    custom_intervention_description: Optional[str]
+    custom_last_update_post_date: Optional[str]
+    irrelevance_reason: Optional[str]
 
 
 class TrialsListResponse(BaseModel):
@@ -484,6 +538,43 @@ async def get_irrelevant_trials(
     return IrrelevantTrialsListResponse(items=items, total=total or 0, page=page, page_size=page_size)
 
 
+@router.get("/irrelevant-trials/{nct_id}", response_model=IrrelevantTrialDetail)
+async def get_irrelevant_trial(
+    nct_id: str,
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(IrrelevantTrial).where(IrrelevantTrial.nct_id == nct_id)
+    result = await db.execute(stmt)
+    trial = result.scalars().first()
+    if not trial:
+        raise HTTPException(status_code=404, detail="Irrelevant trial not found")
+    return trial
+
+
+@router.post("/irrelevant-trials/{nct_id}/restore", response_model=TrialDetail)
+async def restore_irrelevant_trial(
+    nct_id: str,
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(IrrelevantTrial).where(IrrelevantTrial.nct_id == nct_id)
+    result = await db.execute(stmt)
+    trial = result.scalars().first()
+    if not trial:
+        raise HTTPException(status_code=404, detail="Irrelevant trial not found")
+
+    restored = ClinicalTrial(
+        **{f: getattr(trial, f) for f in _BASE_FIELDS},
+        status=TrialStatus.PENDING_REVIEW,
+    )
+    db.add(restored)
+    await db.delete(trial)
+    await db.commit()
+    await db.refresh(restored)
+    return restored
+
+
 @router.get("/trail", response_model=PhpTrialResponse)
 async def get_trail(trail_id: str, db: AsyncSession = Depends(get_db)):
     """WordPress PHP template endpoint — returns an approved trial in legacy PascalCase format."""
@@ -598,6 +689,55 @@ async def reject_trial(
     await db.commit()
     await db.refresh(trial)
     return trial
+
+
+@router.patch("/trials/{nct_id}/edit", response_model=TrialDetail)
+async def edit_trial(
+    nct_id: str,
+    body: ApproveBody,
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update custom fields on any trial without changing its status."""
+    stmt = select(ClinicalTrial).where(ClinicalTrial.nct_id == nct_id)
+    result = await db.execute(stmt)
+    trial = result.scalars().first()
+    if not trial:
+        raise HTTPException(status_code=404, detail="Trial not found")
+
+    for field in _CUSTOM_FIELDS:
+        value = getattr(body, field, None)
+        if value is not None:
+            setattr(trial, field, value)
+
+    await db.commit()
+    await db.refresh(trial)
+    return trial
+
+
+@router.post("/trials/{nct_id}/mark-irrelevant", response_model=IrrelevantTrialDetail)
+async def mark_trial_irrelevant(
+    nct_id: str,
+    body: MarkIrrelevantBody,
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Move a trial from the relevant table to the irrelevant table."""
+    stmt = select(ClinicalTrial).where(ClinicalTrial.nct_id == nct_id)
+    result = await db.execute(stmt)
+    trial = result.scalars().first()
+    if not trial:
+        raise HTTPException(status_code=404, detail="Trial not found")
+
+    irrelevant = IrrelevantTrial(
+        **{f: getattr(trial, f) for f in _BASE_FIELDS},
+        irrelevance_reason=body.irrelevance_reason,
+    )
+    db.add(irrelevant)
+    await db.delete(trial)
+    await db.commit()
+    await db.refresh(irrelevant)
+    return irrelevant
 
 
 @router.patch("/trials/{nct_id}", response_model=TrialResponse)

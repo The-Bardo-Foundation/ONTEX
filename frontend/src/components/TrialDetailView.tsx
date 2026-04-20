@@ -21,12 +21,18 @@ interface Props {
   trial: TrialDetail;
   onApprove?: (reviewerNotes: string, edits: CustomEdits) => Promise<void>;
   onReject?: (reviewerNotes: string) => Promise<void>;
+  onEdit?: (edits: CustomEdits) => Promise<void>;
+  onMarkIrrelevant?: (reason: string) => Promise<void>;
+  adminMode?: boolean;
 }
 
-export function TrialDetailView({ trial, onApprove, onReject }: Props) {
+export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrrelevant, adminMode }: Props) {
   const [edits, setEdits] = useState<CustomEdits>({});
   const [reviewerNotes, setReviewerNotes] = useState(trial.reviewer_notes ?? '');
   const [submitting, setSubmitting] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [markIrrelevantMode, setMarkIrrelevantMode] = useState(false);
+  const [irrelevanceReason, setIrrelevanceReason] = useState('');
 
   function handleFieldChange(field: keyof CustomEdits, value: string) {
     setEdits((prev) => ({ ...prev, [field]: value }));
@@ -52,11 +58,40 @@ export function TrialDetailView({ trial, onApprove, onReject }: Props) {
     }
   }
 
+  async function handleSaveEdit() {
+    if (!onEdit) return;
+    setSubmitting(true);
+    try {
+      await onEdit(edits);
+      setEditMode(false);
+      setEdits({});
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleMarkIrrelevant() {
+    if (!onMarkIrrelevant) return;
+    setSubmitting(true);
+    try {
+      await onMarkIrrelevant(irrelevanceReason);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function cancelEdit() {
+    setEditMode(false);
+    setEdits({});
+    setMarkIrrelevantMode(false);
+    setIrrelevanceReason('');
+  }
+
   const showActions = Boolean(onApprove || onReject);
   const navigate = useNavigate();
 
   // ── Public view ────────────────────────────────────────────────────────────
-  if (!showActions) {
+  if (!showActions && !adminMode) {
     const title    = trial.custom_brief_title    || trial.brief_title;
     const summary  = trial.custom_brief_summary  || trial.brief_summary;
     const status   = trial.custom_overall_status || trial.overall_status;
@@ -186,6 +221,22 @@ export function TrialDetailView({ trial, onApprove, onReject }: Props) {
           <div className="flex items-center gap-2 shrink-0">
             <IngestionEventBadge event={trial.ingestion_event} />
             <StatusBadge status={trial.status} />
+            {adminMode && !editMode && (
+              <button
+                onClick={() => setEditMode(true)}
+                className="px-3 py-1 text-sm font-medium rounded border border-blue-300 text-blue-600 hover:bg-blue-50 transition-colors"
+              >
+                Edit
+              </button>
+            )}
+            {adminMode && editMode && (
+              <button
+                onClick={cancelEdit}
+                className="px-3 py-1 text-sm font-medium rounded border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+            )}
           </div>
         </div>
 
@@ -251,48 +302,105 @@ export function TrialDetailView({ trial, onApprove, onReject }: Props) {
 
       {/* Trial details */}
       <section>
-        {showActions && (
+        {(showActions || editMode) && (
           <div className="grid grid-cols-2 gap-3 mb-2">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Official (ClinicalTrials.gov)</p>
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Custom (AI / Admin)</p>
           </div>
         )}
-        <OfficialVsCustomPanel trial={trial} edits={edits} onChange={showActions ? handleFieldChange : undefined} />
+        <OfficialVsCustomPanel trial={trial} edits={edits} onChange={(showActions || editMode) ? handleFieldChange : undefined} />
       </section>
 
       {/* Reviewer notes + action buttons */}
-      {showActions && (
+      {(showActions || editMode) && (
         <section className="sticky bottom-0 bg-white border-t pt-4 -mx-6 px-6 pb-2">
-          <div className="mb-3">
-            <label className="block text-xs font-medium text-gray-500 mb-1">Reviewer notes (optional)</label>
-            <textarea
-              className="w-full border border-gray-300 rounded p-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-400"
-              rows={2}
-              placeholder="Add a note for the record…"
-              value={reviewerNotes}
-              onChange={(e) => setReviewerNotes(e.target.value)}
-            />
-          </div>
-          <div className="flex gap-3 justify-end">
-            {onReject && (
-              <button
-                onClick={handleReject}
-                disabled={submitting}
-                className="px-4 py-2 text-sm font-medium rounded border border-red-300 text-red-600 hover:bg-red-50 disabled:opacity-50"
-              >
-                Reject
-              </button>
-            )}
-            {onApprove && (
-              <button
-                onClick={handleApprove}
-                disabled={submitting}
-                className="px-4 py-2 text-sm font-medium rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
-              >
-                Approve
-              </button>
-            )}
-          </div>
+          {showActions && (
+            <div className="mb-3">
+              <label className="block text-xs font-medium text-gray-500 mb-1">Reviewer notes (optional)</label>
+              <textarea
+                className="w-full border border-gray-300 rounded p-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-400"
+                rows={2}
+                placeholder="Add a note for the record…"
+                value={reviewerNotes}
+                onChange={(e) => setReviewerNotes(e.target.value)}
+              />
+            </div>
+          )}
+
+          {showActions && (
+            <div className="flex gap-3 justify-end">
+              {onReject && (
+                <button
+                  onClick={handleReject}
+                  disabled={submitting}
+                  className="px-4 py-2 text-sm font-medium rounded border border-red-300 text-red-600 hover:bg-red-50 disabled:opacity-50"
+                >
+                  Reject
+                </button>
+              )}
+              {onApprove && (
+                <button
+                  onClick={handleApprove}
+                  disabled={submitting}
+                  className="px-4 py-2 text-sm font-medium rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+                >
+                  Approve
+                </button>
+              )}
+            </div>
+          )}
+
+          {editMode && (
+            <>
+              {!markIrrelevantMode ? (
+                <div className="flex gap-3 justify-between">
+                  {onMarkIrrelevant && (
+                    <button
+                      onClick={() => setMarkIrrelevantMode(true)}
+                      className="px-4 py-2 text-sm rounded border border-orange-300 text-orange-600 hover:bg-orange-50 transition-colors"
+                    >
+                      Move to Irrelevant
+                    </button>
+                  )}
+                  {onEdit && (
+                    <button
+                      onClick={handleSaveEdit}
+                      disabled={submitting}
+                      className="px-4 py-2 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 ml-auto"
+                    >
+                      Save Changes
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <label className="block text-xs font-medium text-gray-500">Reason for marking irrelevant (optional)</label>
+                  <textarea
+                    value={irrelevanceReason}
+                    onChange={(e) => setIrrelevanceReason(e.target.value)}
+                    rows={2}
+                    placeholder="Why is this trial not relevant?"
+                    className="w-full border border-gray-300 rounded p-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-orange-300"
+                  />
+                  <div className="flex gap-3 justify-end">
+                    <button
+                      onClick={() => setMarkIrrelevantMode(false)}
+                      className="px-4 py-2 text-sm rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleMarkIrrelevant}
+                      disabled={submitting}
+                      className="px-4 py-2 text-sm font-medium rounded bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50"
+                    >
+                      Confirm
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
         </section>
       )}
     </div>
