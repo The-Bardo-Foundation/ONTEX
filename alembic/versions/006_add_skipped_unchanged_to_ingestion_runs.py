@@ -22,8 +22,21 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     op.add_column(
         "ingestion_runs",
-        sa.Column("skipped_unchanged", sa.Integer(), nullable=True),
+        sa.Column(
+            "skipped_unchanged",
+            sa.Integer(),
+            nullable=True,
+            server_default=sa.text("0"),
+        ),
     )
+    op.execute(
+        sa.text(
+            "UPDATE ingestion_runs "
+            "SET skipped_unchanged = 0 "
+            "WHERE skipped_unchanged IS NULL"
+        )
+    )
+    op.alter_column("ingestion_runs", "skipped_unchanged", nullable=False)
 
 
 def downgrade() -> None:
