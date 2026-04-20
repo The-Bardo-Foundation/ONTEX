@@ -581,3 +581,24 @@ async def test_ingestion_status_rejects_unauthenticated(test_client, monkeypatch
     monkeypatch.delenv("SKIP_AUTH_FOR_TESTS", raising=False)
     r = await test_client.get("/api/v1/ingestion/status")
     assert r.status_code == 401
+
+
+# ── GET /ingestion/history ────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_ingestion_history_rejects_unauthenticated(test_client, monkeypatch):
+    monkeypatch.delenv("SKIP_AUTH_FOR_TESTS", raising=False)
+    r = await test_client.get("/api/v1/ingestion/history")
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_ingestion_history_returns_empty_when_no_runs(test_client):
+    r = await test_client.get(
+        "/api/v1/ingestion/history",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["recent_runs"] == []
+    assert body["next_run"] is None  # no scheduler in test env

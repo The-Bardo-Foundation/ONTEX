@@ -102,6 +102,7 @@ async def lifespan(app: FastAPI):
         )
         print("startup: added ingestion job")
         scheduler.start()
+        app.state.scheduler = scheduler
         print("startup: scheduler.start() returned")
     except Exception as e:
         import traceback

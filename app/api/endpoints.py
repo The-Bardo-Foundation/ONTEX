@@ -5,14 +5,14 @@ import re
 from datetime import datetime
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from app.api.middleware import clerk_user, optional_clerk_user
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
-from app.db.models import ClinicalTrial, IngestionEvent, IrrelevantTrial, TrialStatus
+from app.db.models import ClinicalTrial, IngestionEvent, IngestionRun, IrrelevantTrial, TrialStatus
 
 router = APIRouter()
 
@@ -664,3 +664,48 @@ async def start_ingestion(_user: dict = Depends(clerk_user)):
 async def get_ingestion_status(_user: dict = Depends(clerk_user)):
     """Return current ingestion pipeline status for frontend polling."""
     return copy.deepcopy(_ingestion_status)
+
+
+class IngestionRunOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    run_at: datetime
+    candidates_found: int
+    new_trials: int
+    updated_trials: int
+    reeval_trials: int
+    relevant_processed: int
+    irrelevant_processed: int
+    fetch_errors: int
+    classify_errors: int
+
+
+class IngestionHistoryResponse(BaseModel):
+    next_run: Optional[datetime]
+    recent_runs: List[IngestionRunOut]
+
+
+@router.get("/ingestion/history", response_model=IngestionHistoryResponse)
+async def get_ingestion_history(
+    request: Request,
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the last 10 ingestion runs and the next scheduled run time."""
+    stmt = (
+        select(IngestionRun)
+        .order_by(IngestionRun.run_at.desc())
+        .limit(10)
+    )
+    result = await db.execute(stmt)
+    recent_runs = result.scalars().all()
+
+    next_run: Optional[datetime] = None
+    scheduler = getattr(request.app.state, "scheduler", None)
+    if scheduler is not None:
+        jobs = scheduler.get_jobs()
+        if jobs:
+            next_run = jobs[0].next_run_time
+
+    return IngestionHistoryResponse(next_run=next_run, recent_runs=list(recent_runs))
