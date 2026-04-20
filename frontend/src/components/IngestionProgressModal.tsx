@@ -47,12 +47,11 @@ export function IngestionProgressModal({ onClose }: { onClose: () => void }) {
   const [summary, setSummary] = useState<ProgressEvent | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [done, setDone] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
-    const controller = new AbortController();
-    abortRef.current = controller;
+    let stopped = false;
 
     (async () => {
       let token: string | null = null;
@@ -61,89 +60,74 @@ export function IngestionProgressModal({ onClose }: { onClose: () => void }) {
       } catch {
         // getToken may throw in test/local environments — proceed without token
       }
+      const headers: Record<string, string> = token
+        ? { Authorization: `Bearer ${token}` }
+        : {};
 
-      let response: Response;
+      // Fire-and-forget: start the background job. 409 = already running, still poll.
       try {
-        response = await fetch(`${API_URL}/ingestion/run-stream`, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-          signal: controller.signal,
-        });
-      } catch (err: unknown) {
-        if ((err as { name?: string }).name !== 'AbortError') {
-          setErrorMsg('Connection to server lost.');
+        const res = await fetch(`${API_URL}/ingestion/start`, { method: 'POST', headers });
+        if (!res.ok && res.status !== 409) {
+          setErrorMsg(`Failed to start ingestion: ${res.status}`);
           setDone(true);
+          return;
         }
-        return;
-      }
-
-      if (!response.ok || !response.body) {
-        setErrorMsg(`Server error: ${response.status}`);
+      } catch {
+        setErrorMsg('Could not reach server.');
         setDone(true);
         return;
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
+      if (stopped) return;
 
-      const handleEvent = (event: ProgressEvent) => {
-        if (event.step === 'error') {
-          setErrorMsg(event.message ?? 'Unknown error');
-          setDone(true);
-          return;
-        }
-        if (event.step === 'complete') {
-          setSummary(event);
-          setSteps((prev) =>
-            prev.map((s) => (s.state === 'active' ? { ...s, state: 'done' } : s))
+      // Poll /ingestion/status every 2 seconds (without overlapping requests)
+      const poll = async () => {
+        if (stopped) return;
+        try {
+          const res = await fetch(`${API_URL}/ingestion/status`, { headers });
+          if (!res.ok) {
+            if (timeoutRef.current !== null) clearTimeout(timeoutRef.current);
+            setErrorMsg(`Status check failed: ${res.status}`);
+            setDone(true);
+            return;
+          }
+          const data = await res.json();
+          setSteps(
+            data.steps.map((s: {
+              id: string; label: string; state: StepState;
+              count?: number | null; total?: number | null; note?: string | null;
+            }) => ({
+              id: s.id,
+              label: s.label,
+              state: s.state,
+              count: s.count ?? undefined,
+              total: s.total ?? undefined,
+              note: s.note ?? undefined,
+            }))
           );
-          setDone(true);
-          return;
+          if (data.error) {
+            if (timeoutRef.current !== null) clearTimeout(timeoutRef.current);
+            setErrorMsg(data.error);
+            setDone(true);
+          } else if (data.summary) {
+            if (timeoutRef.current !== null) clearTimeout(timeoutRef.current);
+            setSummary(data.summary);
+            setDone(true);
+          } else {
+            timeoutRef.current = setTimeout(poll, 2000);
+          }
+        } catch {
+          // transient network hiccup — keep polling
+          timeoutRef.current = setTimeout(poll, 2000);
         }
-        if (event.step === 'searching_done') {
-          setSteps((prev) =>
-            prev.map((s) =>
-              s.id === 'searching'
-                ? { ...s, state: 'done', note: `${event.count?.toLocaleString()} candidates found` }
-                : s
-            )
-          );
-          return;
-        }
-        setSteps((prev) =>
-          prev.map((s) => {
-            if (s.id !== event.step) return s;
-            return { ...s, state: 'active', count: event.count, total: event.total };
-          })
-        );
       };
 
-      try {
-        while (true) {
-          const { done: streamDone, value } = await reader.read();
-          if (streamDone) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() ?? '';
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            try {
-              handleEvent(JSON.parse(line.slice(6)));
-            } catch {
-              // malformed SSE line — skip
-            }
-          }
-        }
-      } catch (err: unknown) {
-        if ((err as { name?: string }).name !== 'AbortError') {
-          setErrorMsg('Connection to server lost.');
-          setDone(true);
-        }
-      }
+      timeoutRef.current = setTimeout(poll, 2000);
     })();
 
     return () => {
-      controller.abort();
+      stopped = true;
+      if (timeoutRef.current !== null) clearTimeout(timeoutRef.current);
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -193,7 +177,7 @@ export function IngestionProgressModal({ onClose }: { onClose: () => void }) {
         {!done && (
           <button
             onClick={() => {
-              abortRef.current?.abort();
+              if (timeoutRef.current !== null) clearTimeout(timeoutRef.current);
               onClose();
             }}
             className="mt-5 w-full px-4 py-2 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"

@@ -1,38 +1,73 @@
 import asyncio
-import json
+import copy
 import re
 from datetime import datetime
-from typing import AsyncGenerator, List, Optional
+from typing import Any, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from app.api.middleware import clerk_user, optional_clerk_user
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
-from app.db.models import ClinicalTrial, IngestionEvent, IrrelevantTrial, TrialStatus
+from app.db.models import ClinicalTrial, IngestionEvent, IngestionRun, IrrelevantTrial, TrialStatus
 
 router = APIRouter()
 
-# PostgreSQL advisory lock ID used to prevent concurrent ingestion runs across
-# multiple workers/replicas. This replaces the previous in-memory process-local
-# flag, which could not coordinate across processes.
-_INGESTION_ADVISORY_LOCK_ID = 807_531_204_991
+# ── Ingestion background-job state ────────────────────────────────────────────
+# asyncio.Lock() is the right tool here: Railway runs a single process/replica,
+# so an in-process lock is sufficient and avoids the connection-lifetime problem
+# of PostgreSQL advisory locks (which are released when the request session
+# closes, making them useless for a detached background task).
+
+_ingestion_lock = asyncio.Lock()
+
+_STEP_TEMPLATE: list[dict[str, Any]] = [
+    {"id": "searching",        "label": "Searching ClinicalTrials.gov", "state": "waiting", "count": None, "total": None, "note": None},
+    {"id": "fetching_details", "label": "Fetching trial details",        "state": "waiting", "count": None, "total": None, "note": None},
+    {"id": "classifying",      "label": "AI classification",             "state": "waiting", "count": None, "total": None, "note": None},
+    {"id": "summarizing",      "label": "Generating summaries",          "state": "waiting", "count": None, "total": None, "note": None},
+]
+
+_ingestion_status: dict[str, Any] = {
+    "running": False,
+    "steps": copy.deepcopy(_STEP_TEMPLATE),
+    "error": None,
+    "summary": None,
+}
 
 
-async def _try_acquire_ingestion_lock(db: AsyncSession) -> bool:
-    result = await db.execute(
-        select(func.pg_try_advisory_lock(_INGESTION_ADVISORY_LOCK_ID))
-    )
-    return bool(result.scalar())
+def _find_step(step_id: str) -> dict:
+    for s in _ingestion_status["steps"]:
+        if s["id"] == step_id:
+            return s
+    raise KeyError(step_id)
 
 
-async def _release_ingestion_lock(db: AsyncSession) -> None:
-    await db.execute(
-        select(func.pg_advisory_unlock(_INGESTION_ADVISORY_LOCK_ID))
-    )
+async def _ingestion_progress_callback(event: dict) -> None:
+    step_id = event.get("step")
+    if step_id == "searching":
+        _find_step("searching")["state"] = "active"
+    elif step_id == "searching_done":
+        s = _find_step("searching")
+        s["state"] = "done"
+        s["note"] = f"{event.get('count', 0):,} candidates found"
+    elif step_id in ("fetching_details", "classifying", "summarizing"):
+        s = _find_step(step_id)
+        s["state"] = "active"
+        s["count"] = event.get("count")
+        s["total"] = event.get("total")
+    elif step_id == "complete":
+        for s in _ingestion_status["steps"]:
+            if s["state"] == "active":
+                s["state"] = "done"
+        _ingestion_status["summary"] = event
+        _ingestion_status["running"] = False
+    elif step_id == "error":
+        _ingestion_status["error"] = event.get("message", "Unknown error")
+        _ingestion_status["running"] = False
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Pydantic models
 # ──────────────────────────────────────────────────────────────────────────────
@@ -590,61 +625,87 @@ async def update_trial(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Ingestion SSE endpoint
+# Ingestion endpoints (fire-and-forget + polling)
 # ──────────────────────────────────────────────────────────────────────────────
 
-@router.get("/ingestion/run-stream")
-async def run_ingestion_stream(
+@router.post("/ingestion/start")
+async def start_ingestion(_user: dict = Depends(clerk_user)):
+    """
+    Start the ingestion pipeline as a detached background task.
+
+    Returns 200 {"started": true} immediately, or 409 if a run is already
+    in progress. Poll GET /ingestion/status every ~2 s for progress updates.
+    """
+    if _ingestion_lock.locked():
+        raise HTTPException(status_code=409, detail="Ingestion already running")
+
+    _ingestion_status["running"] = True
+    _ingestion_status["steps"] = copy.deepcopy(_STEP_TEMPLATE)
+    _ingestion_status["error"] = None
+    _ingestion_status["summary"] = None
+
+    async def _run() -> None:
+        async with _ingestion_lock:
+            try:
+                import app.services.ingestion as ingestion
+                await ingestion.run_daily_ingestion(
+                    progress_callback=_ingestion_progress_callback
+                )
+            except Exception as exc:
+                _ingestion_status["error"] = str(exc)
+            finally:
+                _ingestion_status["running"] = False
+
+    asyncio.create_task(_run())
+    return {"started": True}
+
+
+@router.get("/ingestion/status")
+async def get_ingestion_status(_user: dict = Depends(clerk_user)):
+    """Return current ingestion pipeline status for frontend polling."""
+    return copy.deepcopy(_ingestion_status)
+
+
+class IngestionRunOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    run_at: datetime
+    candidates_found: int
+    new_trials: int
+    updated_trials: int
+    reeval_trials: int
+    relevant_processed: int
+    irrelevant_processed: int
+    fetch_errors: int
+    classify_errors: int
+
+
+class IngestionHistoryResponse(BaseModel):
+    next_run: Optional[datetime]
+    recent_runs: List[IngestionRunOut]
+
+
+@router.get("/ingestion/history", response_model=IngestionHistoryResponse)
+async def get_ingestion_history(
+    request: Request,
     _user: dict = Depends(clerk_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Start the ingestion pipeline and stream progress events as Server-Sent Events.
-
-    Connects via EventSource; each event is a JSON object with a `step` field.
-    Only one ingestion run is allowed at a time — returns an error event if one
-    is already in progress. A `complete` step is emitted only on successful
-    completion; on failures, the stream ends after an `error` step.
-    """
-    async def event_stream() -> AsyncGenerator[str, None]:
-        lock_acquired = await _try_acquire_ingestion_lock(db)
-        if not lock_acquired:
-            yield f"data: {json.dumps({'step': 'error', 'message': 'Ingestion already running'})}\n\n"
-            return
-
-        queue: asyncio.Queue[Optional[dict]] = asyncio.Queue()
-
-        async def progress_callback(event: dict) -> None:
-            await queue.put(event)
-
-        async def run_and_signal() -> None:
-            try:
-                import app.services.ingestion as ingestion
-                await ingestion.run_daily_ingestion(progress_callback=progress_callback)
-            except Exception as exc:
-                await queue.put({"step": "error", "message": str(exc)})
-            else:
-                await queue.put({"step": "complete"})
-            finally:
-                await queue.put(None)  # sentinel
-
-        task = asyncio.create_task(run_and_signal())
-
-        try:
-            while True:
-                event = await queue.get()
-                if event is None:
-                    break
-                yield f"data: {json.dumps(event)}\n\n"
-        finally:
-            await _release_ingestion_lock(db)
-            task.cancel()
-
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
+    """Return the last 10 ingestion runs and the next scheduled run time."""
+    stmt = (
+        select(IngestionRun)
+        .order_by(IngestionRun.run_at.desc())
+        .limit(10)
     )
+    result = await db.execute(stmt)
+    recent_runs = result.scalars().all()
+
+    next_run: Optional[datetime] = None
+    scheduler = getattr(request.app.state, "scheduler", None)
+    if scheduler is not None:
+        jobs = scheduler.get_jobs()
+        if jobs:
+            next_run = jobs[0].next_run_time
+
+    return IngestionHistoryResponse(next_run=next_run, recent_runs=list(recent_runs))
