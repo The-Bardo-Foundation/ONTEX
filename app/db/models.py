@@ -114,12 +114,25 @@ class ClinicalTrial(ClinicalTrialBase, Base):
 
 
 class IrrelevantTrial(ClinicalTrialBase, Base):
-    """Trials fetched but deemed irrelevant (stored for deduplication and auditing)."""
+    """Trials rejected by AI or human reviewer (stored for deduplication and auditing)."""
 
     __tablename__ = "irrelevant_trials"
 
-    # Why it was marked irrelevant
-    irrelevance_reason: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # AI classification — set by ingestion pipeline; null for human-only rejections
+    ai_relevance_label: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    ai_relevance_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Rejection tracking — null rejected_by means AI rejected; non-null means human
+    rejected_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    rejected_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+    # Free-text note from the human reviewer (not set for AI rejections)
+    reviewer_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Ingestion event at time of rejection
+    ingestion_event: Mapped[Optional[IngestionEvent]] = mapped_column(
+        Enum(IngestionEvent, create_type=False), nullable=True
+    )
 
 
 class IngestionRun(Base):

@@ -501,9 +501,9 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
                       <p className="text-sm font-semibold text-gray-900 leading-snug mb-1">
                         {trial.brief_title}
                       </p>
-                      {trial.irrelevance_reason && (
+                      {trial.ai_relevance_reason && (
                         <p className="text-xs text-amber-700 bg-amber-50 rounded px-2 py-1 mb-2 leading-relaxed">
-                          {trial.irrelevance_reason}
+                          {trial.ai_relevance_reason}
                         </p>
                       )}
                       <div className="flex flex-wrap items-center gap-2">

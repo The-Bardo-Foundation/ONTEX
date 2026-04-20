@@ -94,15 +94,23 @@ export function IrrelevantTrialDetailModal({ nctId, onClose, onRestored }: Props
 
           {trial && (
             <>
-              {/* Irrelevance reason */}
-              {trial.irrelevance_reason && (
-                <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-amber-700 mb-1">
-                    Marked irrelevant
-                  </p>
-                  <p className="text-sm text-amber-800">{trial.irrelevance_reason}</p>
-                </div>
-              )}
+              {/* Rejection metadata */}
+              <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 space-y-1">
+                <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
+                  {trial.rejected_by ? `Rejected by ${trial.rejected_by}` : 'Rejected by AI classifier'}
+                  {trial.rejected_at && (
+                    <span className="ml-2 font-normal normal-case">
+                      {new Date(trial.rejected_at).toLocaleDateString()}
+                    </span>
+                  )}
+                </p>
+                {trial.reviewer_notes && (
+                  <p className="text-sm text-amber-800">{trial.reviewer_notes}</p>
+                )}
+                {trial.ai_relevance_reason && (
+                  <p className="text-sm text-amber-700 italic">{trial.ai_relevance_reason}</p>
+                )}
+              </div>
 
               {/* Metadata chips */}
               <div className="flex flex-wrap gap-2">
