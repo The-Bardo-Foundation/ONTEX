@@ -138,4 +138,5 @@ class IngestionRun(Base):
     irrelevant_processed: Mapped[int] = mapped_column(Integer, default=0)
     fetch_errors: Mapped[int] = mapped_column(Integer, default=0)
     classify_errors: Mapped[int] = mapped_column(Integer, default=0)
+    skipped_unchanged: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
