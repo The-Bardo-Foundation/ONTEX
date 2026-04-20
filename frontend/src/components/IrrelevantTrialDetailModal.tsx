@@ -15,7 +15,26 @@ export function IrrelevantTrialDetailModal({ nctId, onClose, onRestored }: Props
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getIrrelevantTrial(nctId).then(setTrial).catch(() => setError('Failed to load trial.'));
+    let cancelled = false;
+
+    setTrial(null);
+    setError(null);
+
+    getIrrelevantTrial(nctId)
+      .then((data) => {
+        if (!cancelled) {
+          setTrial(data);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setError('Failed to load trial.');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [nctId]);
 
   async function handleRestore() {
