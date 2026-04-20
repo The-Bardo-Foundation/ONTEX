@@ -19,12 +19,13 @@ Covers:
 import json
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from unittest.mock import AsyncMock, MagicMock
 
 from app.db.database import Base
-from app.db.models import ClinicalTrial, IngestionEvent, IrrelevantTrial, TrialStatus
+from app.db.models import ClinicalTrial, IngestionEvent, IngestionRun, IrrelevantTrial, TrialStatus
 from app.services.ai.schemas import ClassificationResult, ConfidenceLabel
 from app.services.ctgov.study_detail import map_api_to_model
 
@@ -264,6 +265,71 @@ async def test_updated_trial_resets_status_to_pending_review(tmp_path, monkeypat
         assert trial is not None
         assert trial.status == TrialStatus.PENDING_REVIEW
         assert trial.last_update_post_date == "2024-09-01"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_updated_trial_with_unchanged_content_is_skipped(tmp_path, monkeypatch):
+    """An APPROVED trial with only an updated last_update_post_date should skip re-review/re-classification."""
+    engine, factory = _make_test_db(tmp_path, "test3_unchanged.db")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    old_update_date = "2024-01-01"
+    trial_dict = make_trial_dict(nct_id="NCT33333334", last_update="2024-09-01")
+
+    async with factory() as db:
+        existing_payload = trial_dict.copy()
+        existing_payload["last_update_post_date"] = old_update_date
+        existing_payload["custom_last_update_post_date"] = old_update_date
+        existing = ClinicalTrial(
+            **existing_payload,
+            status=TrialStatus.APPROVED,
+        )
+        db.add(existing)
+        await db.commit()
+
+    classify_mock = AsyncMock(return_value=make_classification())
+    summarize_mock = AsyncMock(return_value=FAKE_AI_SUMMARIES)
+
+    monkeypatch.setattr("app.services.ingestion.SessionLocal", factory)
+    monkeypatch.setattr(
+        "app.services.ingestion.iter_study_index_rows",
+        lambda **kwargs: [("NCT33333334", "2024-09-01")],
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.fetch_full_study",
+        lambda nct_id: {"protocolSection": {}},
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.map_api_to_model",
+        lambda raw: trial_dict.copy(),
+    )
+    monkeypatch.setattr("app.services.ingestion.AIClient", lambda: _make_mock_ai_client())
+    monkeypatch.setattr("app.services.ingestion.ai_generate_summaries", summarize_mock)
+    monkeypatch.setattr("app.services.ingestion.classify_trial", classify_mock)
+
+    from app.services.ingestion import run_daily_ingestion
+    await run_daily_ingestion(search_terms=["osteosarcoma"])
+
+    classify_mock.assert_not_awaited()
+    summarize_mock.assert_not_awaited()
+
+    async with factory() as db:
+        trial = await db.get(ClinicalTrial, "NCT33333334")
+        assert trial is not None
+        assert trial.status == TrialStatus.APPROVED
+        assert trial.last_update_post_date == "2024-09-01"
+        assert trial.custom_last_update_post_date == "2024-09-01"
+
+        run = await db.execute(select(IngestionRun).order_by(IngestionRun.id.desc()))
+        run = run.scalars().first()
+        assert run is not None
+        assert run.updated_trials == 0
+        assert run.skipped_unchanged == 1
+        assert run.relevant_processed == 0
+        assert run.irrelevant_processed == 0
 
     await engine.dispose()
 
