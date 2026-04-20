@@ -1,6 +1,7 @@
 import axios from 'axios';
 import type {
   ApproveBody,
+  CustomEdits,
   IrrelevantTrialDetail,
   MarkIrrelevantBody,
   RejectBody,
@@ -125,7 +126,7 @@ export const markTrialIrrelevant = async (nct_id: string, body: MarkIrrelevantBo
   return response.data;
 };
 
-export const editTrial = async (nct_id: string, body: ApproveBody): Promise<TrialDetail> => {
+export const editTrial = async (nct_id: string, body: CustomEdits): Promise<TrialDetail> => {
   const response = await api.patch<TrialDetail>(`/trials/${nct_id}/edit`, body);
   return response.data;
 };
