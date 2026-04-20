@@ -706,9 +706,8 @@ async def edit_trial(
         raise HTTPException(status_code=404, detail="Trial not found")
 
     for field in _CUSTOM_FIELDS:
-        value = getattr(body, field, None)
-        if value is not None:
-            setattr(trial, field, value)
+        if field in body.model_fields_set:
+            setattr(trial, field, getattr(body, field))
 
     await db.commit()
     await db.refresh(trial)
