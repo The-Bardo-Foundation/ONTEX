@@ -47,7 +47,7 @@ export function IngestionProgressModal({ onClose }: { onClose: () => void }) {
   const [summary, setSummary] = useState<ProgressEvent | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [done, setDone] = useState(false);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const API_URL = import.meta.env.VITE_API_URL || '/api/v1';
@@ -80,13 +80,13 @@ export function IngestionProgressModal({ onClose }: { onClose: () => void }) {
 
       if (stopped) return;
 
-      // Poll /ingestion/status every 2 seconds
-      intervalRef.current = setInterval(async () => {
+      // Poll /ingestion/status every 2 seconds (without overlapping requests)
+      const poll = async () => {
         if (stopped) return;
         try {
           const res = await fetch(`${API_URL}/ingestion/status`, { headers });
           if (!res.ok) {
-            clearInterval(intervalRef.current!);
+            if (timeoutRef.current !== null) clearTimeout(timeoutRef.current);
             setErrorMsg(`Status check failed: ${res.status}`);
             setDone(true);
             return;
@@ -106,23 +106,28 @@ export function IngestionProgressModal({ onClose }: { onClose: () => void }) {
             }))
           );
           if (data.error) {
-            clearInterval(intervalRef.current!);
+            if (timeoutRef.current !== null) clearTimeout(timeoutRef.current);
             setErrorMsg(data.error);
             setDone(true);
           } else if (data.summary) {
-            clearInterval(intervalRef.current!);
+            if (timeoutRef.current !== null) clearTimeout(timeoutRef.current);
             setSummary(data.summary);
             setDone(true);
+          } else {
+            timeoutRef.current = setTimeout(poll, 2000);
           }
         } catch {
           // transient network hiccup — keep polling
+          timeoutRef.current = setTimeout(poll, 2000);
         }
-      }, 2000);
+      };
+
+      timeoutRef.current = setTimeout(poll, 2000);
     })();
 
     return () => {
       stopped = true;
-      if (intervalRef.current !== null) clearInterval(intervalRef.current);
+      if (timeoutRef.current !== null) clearTimeout(timeoutRef.current);
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -172,7 +177,7 @@ export function IngestionProgressModal({ onClose }: { onClose: () => void }) {
         {!done && (
           <button
             onClick={() => {
-              if (intervalRef.current !== null) clearInterval(intervalRef.current);
+              if (timeoutRef.current !== null) clearTimeout(timeoutRef.current);
               onClose();
             }}
             className="mt-5 w-full px-4 py-2 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
