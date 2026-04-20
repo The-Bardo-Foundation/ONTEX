@@ -12,4 +12,3 @@ class ConfidenceLabel(str, Enum):
 class ClassificationResult(BaseModel):
     label: ConfidenceLabel
     reason: str = Field(max_length=500)
-    matching_criteria: list[str]

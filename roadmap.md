@@ -95,7 +95,7 @@ Create a new function `ai_generate_summaries(client, trial_data: dict) -> dict` 
 - Based on the result:
   - `is_relevant=True`: upsert into `clinical_trials` with `status=PENDING_REVIEW`
   - `is_relevant=False`: upsert into `irrelevant_trials` with `irrelevance_reason` set to the LLM's reason string
-- Store the `classification_result` object fields (`label`, `reason`, `matching_criteria`) somewhere reviewable — columns on `clinical_trials`: `ai_relevance_label`, `ai_relevance_reason`, `ai_matching_criteria`
+- Store the `classification_result` object fields (`label`, `reason`) somewhere reviewable — columns on `clinical_trials`: `ai_relevance_label`, `ai_relevance_reason`
 
 #### 1.5 Implement `ingestion.py` Step 6 — detect new vs. updated trials ✅
 
@@ -170,8 +170,6 @@ Add columns to `clinical_trials`:
 |---|---|---|
 | `ai_relevance_label` | String | LLM classification label: `confident`, `unsure`, or `reject` |
 | `ai_relevance_reason` | Text | LLM explanation for relevance decision |
-| `ai_relevance_tier` | String | e.g. "primary", "secondary" |
-| `ai_matching_criteria` | JSON/Text | List of matching criteria tags |
 | `ingestion_event` | Enum: `NEW` / `UPDATED` | Was this trial new or updated in the last run? |
 | `previous_status` | Enum | Status before the last ingestion update |
 | `previous_approved_at` | DateTime | When it was last approved (if applicable) |

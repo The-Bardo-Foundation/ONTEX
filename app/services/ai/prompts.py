@@ -11,8 +11,7 @@ than including an irrelevant one. The editorial team will make the final decisio
 ## WHAT OSTEOSARCOMA IS
 
 Osteosarcoma (also called osteogenic sarcoma) is a primary malignant bone tumour. It is
-DISTINCT from the following — do NOT classify these as relevant unless osteosarcoma is
-also explicitly included:
+DISTINCT from the following:
 - Soft tissue sarcomas (leiomyosarcoma, liposarcoma, synovial sarcoma, rhabdomyosarcoma, etc.)
 - Kaposi sarcoma — a vascular tumour caused by HHV-8 infection, unrelated to bone
 - Carcinosarcoma (e.g. uterine or ovarian carcinosarcoma) — a carcinoma variant, NOT a bone tumour
@@ -86,21 +85,8 @@ REJECT:
 Return ONLY valid JSON:
 {
   "label": "confident",
-  "reason": "1-2 sentence justification referencing the specific eligibility or study focus",
-  "matching_criteria": ["osteosarcoma_in_conditions"]
+  "reason": "A justification referencing the specific eligibility or study focus"
 }
-
-Valid matching_criteria tags:
-- osteosarcoma_in_title
-- osteosarcoma_in_conditions
-- osteosarcoma_in_eligibility
-- bone_sarcoma_eligible
-- broad_sarcoma_trial
-- pediatric_aya_eligible
-- phase1_open_enrollment
-- solid_tumor_with_sarcoma
-- survivorship_rehabilitation
-- none
 """
 
 CLASSIFICATION_USER_PROMPT_TEMPLATE = """\

@@ -113,7 +113,6 @@ class TrialDetail(BaseModel):
     # AI classification
     ai_relevance_label: Optional[str]
     ai_relevance_reason: Optional[str]
-    ai_matching_criteria: Optional[str]  # JSON string
 
     # Workflow tracking
     approved_at: Optional[datetime]

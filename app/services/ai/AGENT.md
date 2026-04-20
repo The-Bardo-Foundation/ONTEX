@@ -39,20 +39,14 @@ A `ClinicalTrial` object with these fields:
 JSON classification result:
 ```json
 {
-  "is_relevant": true,
-  "confidence": 0.92,
-  "reason": "Trial explicitly targets recurrent osteosarcoma in pediatric patients.",
-  "relevance_tier": "primary",
-  "matching_criteria": ["osteosarcoma_in_conditions", "osteosarcoma_in_eligibility"]
+  "label": "confident",
+  "reason": "Trial explicitly targets recurrent osteosarcoma in pediatric patients."
 }
 ```
 
 Fields:
-- `is_relevant`: boolean
-- `confidence`: float 0.0–1.0
+- `label`: `"confident"` | `"unsure"` | `"reject"`
 - `reason`: 1–2 sentence justification
-- `relevance_tier`: `"primary"` | `"secondary"` | `"irrelevant"`
-- `matching_criteria`: list of tags that matched (see section 3.3)
 
 ---
 
@@ -104,19 +98,7 @@ Fields:
 - If the same trial appears under multiple NCT numbers, keep only the most
   recent one. Flag duplicates in the irrelevance reason.
 
-### 3.3 Valid matching_criteria Tags
-
-- `osteosarcoma_in_title`
-- `osteosarcoma_in_conditions`
-- `osteosarcoma_in_eligibility`
-- `bone_sarcoma_eligible`
-- `broad_sarcoma_trial`
-- `pediatric_aya_eligible`
-- `phase1_open_enrollment`
-- `solid_tumor_with_sarcoma`
-- `none`
-
-### 3.4 Confidence Thresholds
+### 3.3 Confidence Thresholds
 
 - confidence >= 0.7 AND is_relevant=true → auto-classify as RELEVANT
 - confidence >= 0.7 AND is_relevant=false → auto-classify as IRRELEVANT
