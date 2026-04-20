@@ -62,6 +62,9 @@ export function IngestionDashboardModal({ onClose }: { onClose: () => void }) {
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const headersRef = useRef<Record<string, string>>({});
+  // True once this client has observed an in-progress run. Prevents showing
+  // a stale summary from a previous run when the modal first opens.
+  const sawRunningRef = useRef(false);
 
   // ── Auth headers ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -103,11 +106,13 @@ export function IngestionDashboardModal({ onClose }: { onClose: () => void }) {
         const data: LiveStatus = await res.json();
         setStatus(data);
 
-        if (data.error && !done) {
+        if (data.running) sawRunningRef.current = true;
+
+        if (data.error && !done && sawRunningRef.current) {
           clearInterval(intervalRef.current!);
           setErrorMsg(data.error);
           setDone(true);
-        } else if (data.summary && !done) {
+        } else if (data.summary && !done && sawRunningRef.current) {
           clearInterval(intervalRef.current!);
           setSummary(data.summary);
           setDone(true);
