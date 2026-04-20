@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { getIrrelevantTrials, getTrialFacets, getTrials } from '../api';
 import type { GetIrrelevantTrialsParams, GetTrialsParams, IrrelevantTrialListItem, IrrelevantTrialsListResponse, TrialFacets } from '../api';
 import { IngestionEventBadge } from '../components/IngestionEventBadge';
+import { IrrelevantTrialDetailModal } from '../components/IrrelevantTrialDetailModal';
 import { StatusBadge } from '../components/StatusBadge';
 import type { TrialListItem, TrialsListResponse } from '../types';
 import { formatPhase, getOverallStatusDisplay } from '../utils/formatters';
@@ -212,6 +213,7 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
     sort_by: 'last_update_post_date',
   });
   const [searchInput, setSearchInput] = useState('');
+  const [selectedIrrelevantId, setSelectedIrrelevantId] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch facets once for filter dropdowns (public mode only)
@@ -483,7 +485,19 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
                 {irrelevantResponse.items.map((trial: IrrelevantTrialListItem) => {
                   const statusDisplay = getOverallStatusDisplay(trial.overall_status);
                   return (
-                    <li key={trial.nct_id} className="px-6 py-4">
+                    <li
+                      key={trial.nct_id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setSelectedIrrelevantId(trial.nct_id)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          setSelectedIrrelevantId(trial.nct_id);
+                        }
+                      }}
+                      className="px-6 py-4 hover:bg-gray-50 cursor-pointer transition-colors"
+                    >
                       <p className="text-sm font-semibold text-gray-900 leading-snug mb-1">
                         {trial.brief_title}
                       </p>
@@ -605,6 +619,21 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
             Next
           </button>
         </div>
+      )}
+
+      {selectedIrrelevantId && (
+        <IrrelevantTrialDetailModal
+          nctId={selectedIrrelevantId}
+          onClose={() => setSelectedIrrelevantId(null)}
+          onRestored={(id) => {
+            setIrrelevantResponse((prev) =>
+              prev
+                ? { ...prev, items: prev.items.filter((t) => t.nct_id !== id), total: prev.total - 1 }
+                : prev
+            );
+            setSelectedIrrelevantId(null);
+          }}
+        />
       )}
     </div>
   );

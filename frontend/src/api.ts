@@ -1,6 +1,9 @@
 import axios from 'axios';
 import type {
   ApproveBody,
+  CustomEdits,
+  IrrelevantTrialDetail,
+  MarkIrrelevantBody,
   RejectBody,
   TrialDetail,
   TrialListItem,
@@ -105,5 +108,25 @@ export interface GetIrrelevantTrialsParams {
 
 export const getIrrelevantTrials = async (params: GetIrrelevantTrialsParams = {}): Promise<IrrelevantTrialsListResponse> => {
   const response = await api.get<IrrelevantTrialsListResponse>('/irrelevant-trials', { params });
+  return response.data;
+};
+
+export const getIrrelevantTrial = async (nct_id: string): Promise<IrrelevantTrialDetail> => {
+  const response = await api.get<IrrelevantTrialDetail>(`/irrelevant-trials/${nct_id}`);
+  return response.data;
+};
+
+export const restoreIrrelevantTrial = async (nct_id: string): Promise<TrialDetail> => {
+  const response = await api.post<TrialDetail>(`/irrelevant-trials/${nct_id}/restore`, {});
+  return response.data;
+};
+
+export const markTrialIrrelevant = async (nct_id: string, body: MarkIrrelevantBody): Promise<IrrelevantTrialDetail> => {
+  const response = await api.post<IrrelevantTrialDetail>(`/trials/${nct_id}/mark-irrelevant`, body);
+  return response.data;
+};
+
+export const editTrial = async (nct_id: string, body: CustomEdits): Promise<TrialDetail> => {
+  const response = await api.patch<TrialDetail>(`/trials/${nct_id}/edit`, body);
   return response.data;
 };

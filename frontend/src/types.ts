@@ -105,3 +105,43 @@ export interface RejectBody {
 }
 
 export type CustomEdits = Partial<Omit<ApproveBody, 'reviewer_notes'>>;
+
+export interface IrrelevantTrialDetail {
+  nct_id: string;
+  brief_title: string;
+  brief_summary: string | null;
+  overall_status: string | null;
+  phase: string | null;
+  study_type: string | null;
+  location_country: string | null;
+  location_city: string | null;
+  minimum_age: string | null;
+  maximum_age: string | null;
+  central_contact_name: string | null;
+  central_contact_phone: string | null;
+  central_contact_email: string | null;
+  eligibility_criteria: string | null;
+  intervention_description: string | null;
+  key_information: string | null;
+  last_update_post_date: string | null;
+  custom_brief_title: string | null;
+  custom_brief_summary: string | null;
+  custom_overall_status: string | null;
+  custom_phase: string | null;
+  custom_study_type: string | null;
+  custom_location_country: string | null;
+  custom_location_city: string | null;
+  custom_minimum_age: string | null;
+  custom_maximum_age: string | null;
+  custom_central_contact_name: string | null;
+  custom_central_contact_phone: string | null;
+  custom_central_contact_email: string | null;
+  custom_eligibility_criteria: string | null;
+  custom_intervention_description: string | null;
+  custom_last_update_post_date: string | null;
+  irrelevance_reason: string | null;
+}
+
+export interface MarkIrrelevantBody {
+  irrelevance_reason?: string;
+}

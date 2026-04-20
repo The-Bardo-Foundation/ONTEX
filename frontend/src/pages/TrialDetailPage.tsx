@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '@clerk/clerk-react';
-import { approveTrial, getTrial, rejectTrial } from '../api';
+import { approveTrial, editTrial, getTrial, markTrialIrrelevant, rejectTrial } from '../api';
 import { TrialDetailView } from '../components/TrialDetailView';
 import type { CustomEdits, TrialDetail } from '../types';
 
@@ -39,6 +39,18 @@ export function TrialDetailPage() {
     setDetail(updated);
   }
 
+  async function handleEdit(edits: CustomEdits) {
+    if (!nct_id) return;
+    const updated = await editTrial(nct_id, edits);
+    setDetail(updated);
+  }
+
+  async function handleMarkIrrelevant(reason: string) {
+    if (!nct_id) return;
+    await markTrialIrrelevant(nct_id, { irrelevance_reason: reason || undefined });
+    navigate('/admin/trials');
+  }
+
   if (notFound) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-3">
@@ -67,6 +79,9 @@ export function TrialDetailPage() {
         trial={detail}
         onApprove={canReview ? handleApprove : undefined}
         onReject={canReview ? handleReject : undefined}
+        onEdit={isSignedIn ? handleEdit : undefined}
+        onMarkIrrelevant={isSignedIn ? handleMarkIrrelevant : undefined}
+        adminMode={!!isSignedIn}
       />
     </div>
   );
