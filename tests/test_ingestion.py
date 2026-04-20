@@ -271,17 +271,18 @@ async def test_updated_trial_resets_status_to_pending_review(tmp_path, monkeypat
 
 @pytest.mark.asyncio
 async def test_updated_trial_with_unchanged_content_is_skipped(tmp_path, monkeypatch):
-    """An APPROVED trial with only a newer date should skip re-review/re-classification."""
+    """An APPROVED trial with only an updated last_update_post_date should skip re-review/re-classification."""
     engine, factory = _make_test_db(tmp_path, "test3_unchanged.db")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+    old_update_date = "2024-01-01"
     trial_dict = make_trial_dict(nct_id="NCT33333334", last_update="2024-09-01")
 
     async with factory() as db:
         existing_payload = trial_dict.copy()
-        existing_payload["last_update_post_date"] = "2024-01-01"
-        existing_payload["custom_last_update_post_date"] = "2024-01-01"
+        existing_payload["last_update_post_date"] = old_update_date
+        existing_payload["custom_last_update_post_date"] = old_update_date
         existing = ClinicalTrial(
             **existing_payload,
             status=TrialStatus.APPROVED,
@@ -322,9 +323,8 @@ async def test_updated_trial_with_unchanged_content_is_skipped(tmp_path, monkeyp
         assert trial.last_update_post_date == "2024-09-01"
         assert trial.custom_last_update_post_date == "2024-09-01"
 
-        run = (
-            await db.execute(select(IngestionRun).order_by(IngestionRun.id.desc()))
-        ).scalars().first()
+        run = await db.execute(select(IngestionRun).order_by(IngestionRun.id.desc()))
+        run = run.scalars().first()
         assert run is not None
         assert run.updated_trials == 0
         assert run.skipped_unchanged == 1
