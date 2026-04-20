@@ -38,7 +38,6 @@ def make_classification(
     return ClassificationResult(
         label=label,
         reason=reason,
-        matching_criteria=["osteosarcoma_in_conditions"],
     )
 
 

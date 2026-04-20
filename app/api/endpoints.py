@@ -12,7 +12,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
-from app.db.models import ClinicalTrial, IngestionEvent, TrialStatus
+from app.db.models import ClinicalTrial, IngestionEvent, IrrelevantTrial, TrialStatus
 
 router = APIRouter()
 
@@ -65,6 +65,11 @@ class TrialListItem(BaseModel):
     status: TrialStatus
     ingestion_event: Optional[IngestionEvent]
     last_update_post_date: Optional[str]
+    ai_relevance_label: Optional[str]
+    location_country: Optional[str]
+    location_city: Optional[str]
+    custom_location_country: Optional[str]
+    custom_location_city: Optional[str]
 
 
 class TrialDetail(BaseModel):
@@ -112,7 +117,6 @@ class TrialDetail(BaseModel):
     # AI classification
     ai_relevance_label: Optional[str]
     ai_relevance_reason: Optional[str]
-    ai_matching_criteria: Optional[str]  # JSON string
 
     # Workflow tracking
     approved_at: Optional[datetime]
@@ -165,6 +169,25 @@ class RejectBody(BaseModel):
 
 class TrialsListResponse(BaseModel):
     items: List[TrialListItem]
+    total: int
+    page: int
+    page_size: int
+
+
+class IrrelevantTrialListItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    nct_id: str
+    brief_title: str
+    phase: Optional[str]
+    overall_status: Optional[str]
+    brief_summary: Optional[str]
+    last_update_post_date: Optional[str]
+    irrelevance_reason: Optional[str]
+
+
+class IrrelevantTrialsListResponse(BaseModel):
+    items: List[IrrelevantTrialListItem]
     total: int
     page: int
     page_size: int
@@ -390,6 +413,40 @@ async def get_trials(
         items = result.scalars().all()
 
     return TrialsListResponse(items=items, total=total or 0, page=page, page_size=page_size)
+
+
+@router.get("/irrelevant-trials", response_model=IrrelevantTrialsListResponse)
+async def get_irrelevant_trials(
+    q: Optional[str] = None,
+    sort_by: Optional[str] = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List irrelevant trials (AI-rejected) with search, sorting, and pagination. Admin only."""
+    stmt = select(IrrelevantTrial)
+
+    if q:
+        stmt = stmt.where(
+            or_(
+                IrrelevantTrial.brief_title.ilike(f"%{q}%"),
+                IrrelevantTrial.brief_summary.ilike(f"%{q}%"),
+            )
+        )
+
+    if sort_by == "brief_title":
+        stmt = stmt.order_by(IrrelevantTrial.brief_title.asc())
+    else:
+        stmt = stmt.order_by(IrrelevantTrial.last_update_post_date.desc())
+
+    count_stmt = select(func.count()).select_from(stmt.subquery())
+    total = await db.scalar(count_stmt)
+    stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+    result = await db.execute(stmt)
+    items = result.scalars().all()
+
+    return IrrelevantTrialsListResponse(items=items, total=total or 0, page=page, page_size=page_size)
 
 
 @router.get("/trail", response_model=PhpTrialResponse)

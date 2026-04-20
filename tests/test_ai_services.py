@@ -32,7 +32,6 @@ def _classification(**kwargs) -> ClassificationResult:
     defaults = dict(
         label=ConfidenceLabel.CONFIDENT,
         reason="osteosarcoma mentioned",
-        matching_criteria=["osteosarcoma_in_conditions"],
     )
     defaults.update(kwargs)
     return ClassificationResult(**defaults)
@@ -115,7 +114,7 @@ async def test_classify_trial_reject_returned_unchanged():
 
     mock_client = MagicMock()
     mock_client.classify_trial = AsyncMock(
-        return_value=_classification(label=ConfidenceLabel.REJECT, matching_criteria=["none"])
+        return_value=_classification(label=ConfidenceLabel.REJECT)
     )
 
     result = await classify_trial(mock_client, _trial())
@@ -132,7 +131,6 @@ async def test_classify_trial_unsure_goes_to_review():
         return_value=_classification(
             label=ConfidenceLabel.UNSURE,
             reason="uncertain eligibility",
-            matching_criteria=["none"],
         )
     )
 
@@ -170,8 +168,7 @@ async def test_ai_client_generate_summaries_returns_none_on_all_retries_exhauste
 async def test_ai_client_classify_trial_parses_json_on_success(ai_client):
     mock_response = MagicMock()
     mock_response.choices[0].message.content = (
-        '{"label": "confident", "reason": "osteosarcoma",'
-        ' "matching_criteria": ["osteosarcoma_in_conditions"]}'
+        '{"label": "confident", "reason": "osteosarcoma"}'
     )
     ai_client._client.chat.completions.create = AsyncMock(return_value=mock_response)
 
