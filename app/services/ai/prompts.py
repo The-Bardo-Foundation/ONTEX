@@ -11,8 +11,7 @@ than including an irrelevant one. The editorial team will make the final decisio
 ## WHAT OSTEOSARCOMA IS
 
 Osteosarcoma (also called osteogenic sarcoma) is a primary malignant bone tumour. It is
-DISTINCT from the following — do NOT classify these as relevant unless osteosarcoma is
-also explicitly included:
+DISTINCT from the following:
 - Soft tissue sarcomas (leiomyosarcoma, liposarcoma, synovial sarcoma, rhabdomyosarcoma, etc.)
 - Kaposi sarcoma — a vascular tumour caused by HHV-8 infection, unrelated to bone
 - Carcinosarcoma (e.g. uterine or ovarian carcinosarcoma) — a carcinoma variant, NOT a bone tumour
@@ -86,21 +85,8 @@ REJECT:
 Return ONLY valid JSON:
 {
   "label": "confident",
-  "reason": "1-2 sentence justification referencing the specific eligibility or study focus",
-  "matching_criteria": ["osteosarcoma_in_conditions"]
+  "reason": "A justification referencing the specific eligibility or study focus"
 }
-
-Valid matching_criteria tags:
-- osteosarcoma_in_title
-- osteosarcoma_in_conditions
-- osteosarcoma_in_eligibility
-- bone_sarcoma_eligible
-- broad_sarcoma_trial
-- pediatric_aya_eligible
-- phase1_open_enrollment
-- solid_tumor_with_sarcoma
-- survivorship_rehabilitation
-- none
 """
 
 CLASSIFICATION_USER_PROMPT_TEMPLATE = """\
@@ -130,14 +116,17 @@ families can understand, without medical jargon.
 Given a clinical trial's official information, produce a JSON object with this
 patient-friendly field:
 
-  "custom_brief_summary"            – 2-3 sentence plain-language summary of what the
+  "custom_brief_summary"            – plain-language summary of what the
                                       trial is testing and why it matters to patients
 
 Rules:
-- Use plain language (aim for 8th grade reading level)
+- Create a patient friendly summary for clinical trial {nct_id}.
+- Summarise Intervention Description, Title, Brief Summary and Key Information.
+- Retain any drug names in the summary
 - Never use unexplained medical abbreviations
 - If the official data is missing or unclear, return null for the field
 - Return ONLY valid JSON with exactly this one key
+
 """
 
 SUMMARIZATION_USER_PROMPT_TEMPLATE = """\

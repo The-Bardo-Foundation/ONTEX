@@ -109,5 +109,4 @@ class AIClient:
         return ClassificationResult(
             label=ConfidenceLabel.UNSURE,
             reason="AI evaluation failed -- needs manual review",
-            matching_criteria=["none"],
         )

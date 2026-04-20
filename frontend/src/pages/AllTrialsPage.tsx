@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getTrialFacets, getTrials } from '../api';
-import type { GetTrialsParams, TrialFacets } from '../api';
+import { getIrrelevantTrials, getTrialFacets, getTrials } from '../api';
+import type { GetIrrelevantTrialsParams, GetTrialsParams, IrrelevantTrialListItem, IrrelevantTrialsListResponse, TrialFacets } from '../api';
 import { IngestionEventBadge } from '../components/IngestionEventBadge';
 import { StatusBadge } from '../components/StatusBadge';
 import type { TrialListItem, TrialsListResponse } from '../types';
@@ -195,7 +195,9 @@ function RadioOption({
 
 export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
   const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState<'relevant' | 'irrelevant'>('relevant');
   const [response, setResponse] = useState<TrialsListResponse | null>(null);
+  const [irrelevantResponse, setIrrelevantResponse] = useState<IrrelevantTrialsListResponse | null>(null);
   const [facets, setFacets] = useState<TrialFacets | null>(null);
   const [params, setParams] = useState<GetTrialsParams>(() => ({
     page: 1,
@@ -204,6 +206,11 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
     // Public mode always shows APPROVED trials only
     status: adminMode ? undefined : 'APPROVED',
   }));
+  const [irrelevantParams, setIrrelevantParams] = useState<GetIrrelevantTrialsParams>({
+    page: 1,
+    page_size: PAGE_SIZE,
+    sort_by: 'last_update_post_date',
+  });
   const [searchInput, setSearchInput] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -214,42 +221,89 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
     }
   }, [adminMode]);
 
-  // Fetch whenever params change
+  // Fetch relevant trials whenever params change (always in public mode; relevant tab in admin)
   useEffect(() => {
-    getTrials(params).then(setResponse).catch(console.error);
-  }, [params]);
+    if (!adminMode || activeTab === 'relevant') {
+      getTrials(params).then(setResponse).catch(console.error);
+    }
+  }, [params, adminMode, activeTab]);
 
-  // Debounce search input → update params.q
+  // Fetch irrelevant trials whenever irrelevantParams change (admin irrelevant tab only)
+  useEffect(() => {
+    if (adminMode && activeTab === 'irrelevant') {
+      getIrrelevantTrials(irrelevantParams).then(setIrrelevantResponse).catch(console.error);
+    }
+  }, [irrelevantParams, adminMode, activeTab]);
+
+  // Debounce search input → update params.q / irrelevantParams.q
   function handleSearchChange(value: string) {
     setSearchInput(value);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      setParams((p) => ({ ...p, q: value || undefined, page: 1 }));
+      if (activeTab === 'irrelevant') {
+        setIrrelevantParams((p) => ({ ...p, q: value || undefined, page: 1 }));
+      } else {
+        setParams((p) => ({ ...p, q: value || undefined, page: 1 }));
+      }
     }, 300);
   }
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
 
   function setFilter(key: keyof GetTrialsParams, value: string) {
     setParams((p) => ({ ...p, [key]: value || undefined, page: 1 }));
   }
 
-  const totalPages = response ? Math.ceil(response.total / PAGE_SIZE) : 1;
+  function switchTab(tab: 'relevant' | 'irrelevant') {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    setActiveTab(tab);
+    setSearchInput('');
+    setParams((p) => ({ ...p, q: undefined, page: 1 }));
+    setIrrelevantParams((p) => ({ ...p, q: undefined, page: 1 }));
+  }
+
+  const currentTotal = activeTab === 'irrelevant' ? irrelevantResponse?.total : response?.total;
+  const totalPages = currentTotal !== undefined ? Math.ceil(currentTotal / PAGE_SIZE) : 1;
+  const currentPage = activeTab === 'irrelevant' ? (irrelevantParams.page ?? 1) : (params.page ?? 1);
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header bar */}
       <div className="px-6 py-4 border-b bg-white space-y-3">
-        <h1 className="text-base font-semibold text-gray-700">
-          {adminMode ? 'All Trials' : 'Clinical Trials'}
-        </h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-base font-semibold text-gray-700">
+            {adminMode ? 'All Trials' : 'Clinical Trials'}
+          </h1>
+          {adminMode && (
+            <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm">
+              <button
+                onClick={() => switchTab('relevant')}
+                className={`px-3 py-1 transition-colors ${activeTab === 'relevant' ? 'bg-blue-600 text-white font-medium' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+              >
+                Relevant
+              </button>
+              <button
+                onClick={() => switchTab('irrelevant')}
+                className={`px-3 py-1 border-l border-gray-200 transition-colors ${activeTab === 'irrelevant' ? 'bg-blue-600 text-white font-medium' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+              >
+                Irrelevant
+              </button>
+            </div>
+          )}
+        </div>
         <input
           type="search"
-          placeholder="Search by title, summary, or eligibility…"
+          placeholder="Search by title or summary…"
           value={searchInput}
           onChange={(e) => handleSearchChange(e.target.value)}
           className="w-full border border-gray-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
         />
         <div className="flex items-center gap-3 flex-wrap">
-          {adminMode && (
+          {adminMode && activeTab === 'relevant' && (
             <select
               className={SELECT_CLS}
               onChange={(e) => setFilter('status', e.target.value)}
@@ -259,7 +313,7 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
               ))}
             </select>
           )}
-          {adminMode && (
+          {adminMode && activeTab === 'relevant' && (
             <select
               className={SELECT_CLS}
               onChange={(e) => setFilter('ingestion_event', e.target.value)}
@@ -269,7 +323,7 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
               ))}
             </select>
           )}
-          {adminMode && (
+          {adminMode && activeTab === 'relevant' && (
             <select
               className={SELECT_CLS}
               onChange={(e) => setFilter('phase', e.target.value)}
@@ -279,7 +333,7 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
               ))}
             </select>
           )}
-          {adminMode && (
+          {adminMode && activeTab === 'relevant' && (
             <select
               className={SELECT_CLS}
               onChange={(e) => setFilter('recruiting_status', e.target.value)}
@@ -292,15 +346,21 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
           <select
             className={SELECT_CLS}
             defaultValue="last_update_post_date"
-            onChange={(e) => setFilter('sort_by', e.target.value)}
+            onChange={(e) => {
+              if (activeTab === 'irrelevant') {
+                setIrrelevantParams((p) => ({ ...p, sort_by: e.target.value || undefined, page: 1 }));
+              } else {
+                setFilter('sort_by', e.target.value);
+              }
+            }}
           >
             {SORT_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </select>
-          {response && (
+          {currentTotal !== undefined && (
             <span className="text-xs text-gray-400 ml-auto">
-              {response.total} trial{response.total !== 1 ? 's' : ''}
+              {currentTotal} trial{currentTotal !== 1 ? 's' : ''}
             </span>
           )}
         </div>
@@ -409,7 +469,51 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
 
         {/* Trial list */}
         <div className="flex-1 overflow-y-auto">
-          {!response ? (
+          {adminMode && activeTab === 'irrelevant' ? (
+            !irrelevantResponse ? (
+              <div className="flex items-center justify-center h-32">
+                <p className="text-sm text-gray-400">Loading…</p>
+              </div>
+            ) : irrelevantResponse.items.length === 0 ? (
+              <div className="flex items-center justify-center h-32">
+                <p className="text-sm text-gray-400">No irrelevant trials found.</p>
+              </div>
+            ) : (
+              <ul className="divide-y divide-gray-100">
+                {irrelevantResponse.items.map((trial: IrrelevantTrialListItem) => {
+                  const statusDisplay = getOverallStatusDisplay(trial.overall_status);
+                  return (
+                    <li key={trial.nct_id} className="px-6 py-4">
+                      <p className="text-sm font-semibold text-gray-900 leading-snug mb-1">
+                        {trial.brief_title}
+                      </p>
+                      {trial.irrelevance_reason && (
+                        <p className="text-xs text-amber-700 bg-amber-50 rounded px-2 py-1 mb-2 leading-relaxed">
+                          {trial.irrelevance_reason}
+                        </p>
+                      )}
+                      <div className="flex flex-wrap items-center gap-2">
+                        {trial.overall_status && (
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusDisplay.className}`}>
+                            {statusDisplay.label}
+                          </span>
+                        )}
+                        {trial.phase && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">
+                            {formatPhase(trial.phase)}
+                          </span>
+                        )}
+                        <span className="text-xs text-gray-400 ml-auto">{trial.nct_id}</span>
+                        {trial.last_update_post_date && (
+                          <span className="text-xs text-gray-400">· Updated {trial.last_update_post_date}</span>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )
+          ) : !response ? (
             <div className="flex items-center justify-center h-32">
               <p className="text-sm text-gray-400">Loading…</p>
             </div>
@@ -422,6 +526,9 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
               {response.items.map((trial: TrialListItem) => {
                 const statusDisplay = getOverallStatusDisplay(trial.overall_status);
                 const summary = trial.custom_brief_summary || trial.brief_summary;
+                const city = trial.custom_location_city ?? trial.location_city;
+                const country = trial.custom_location_country ?? trial.location_country;
+                const location = [city, country].filter(Boolean).join(', ');
                 return (
                   <li
                     key={trial.nct_id}
@@ -435,6 +542,9 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
                       <p className="text-xs text-gray-500 leading-relaxed mb-2 line-clamp-2">
                         {summary}
                       </p>
+                    )}
+                    {location && (
+                      <p className="text-xs text-gray-400 mb-2">{location}</p>
                     )}
                     <div className="flex flex-wrap items-center gap-2">
                       {trial.overall_status && (
@@ -463,21 +573,33 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
       </div>
 
       {/* Pagination */}
-      {response && totalPages > 1 && (
+      {totalPages > 1 && (
         <div className="px-6 py-3 border-t bg-white flex items-center justify-end gap-3">
           <button
-            disabled={params.page === 1}
-            onClick={() => setParams((p) => ({ ...p, page: (p.page ?? 1) - 1 }))}
+            disabled={currentPage === 1}
+            onClick={() => {
+              if (activeTab === 'irrelevant') {
+                setIrrelevantParams((p) => ({ ...p, page: (p.page ?? 1) - 1 }));
+              } else {
+                setParams((p) => ({ ...p, page: (p.page ?? 1) - 1 }));
+              }
+            }}
             className="px-4 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg shadow-sm hover:bg-gray-50 hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             Previous
           </button>
           <span className="text-sm text-gray-400">
-            Page {params.page} of {totalPages}
+            Page {currentPage} of {totalPages}
           </span>
           <button
-            disabled={params.page === totalPages}
-            onClick={() => setParams((p) => ({ ...p, page: (p.page ?? 1) + 1 }))}
+            disabled={currentPage === totalPages}
+            onClick={() => {
+              if (activeTab === 'irrelevant') {
+                setIrrelevantParams((p) => ({ ...p, page: (p.page ?? 1) + 1 }));
+              } else {
+                setParams((p) => ({ ...p, page: (p.page ?? 1) + 1 }));
+              }
+            }}
             className="px-4 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg shadow-sm hover:bg-gray-50 hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             Next

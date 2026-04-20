@@ -88,21 +88,8 @@ REJECT:
 Return ONLY valid JSON:
 {
   "label": "confident",
-  "reason": "1-2 sentence justification referencing the specific eligibility or study focus",
-  "matching_criteria": ["osteosarcoma_in_conditions"]
-}
-
-Valid matching_criteria tags:
-- osteosarcoma_in_title
-- osteosarcoma_in_conditions
-- osteosarcoma_in_eligibility
-- bone_sarcoma_eligible
-- broad_sarcoma_trial
-- pediatric_aya_eligible
-- phase1_open_enrollment
-- solid_tumor_with_sarcoma
-- survivorship_rehabilitation
-- none`;
+  "reason": "1-2 sentence justification referencing the specific eligibility or study focus"
+}`;
 
 const EXAMPLES = [
   {

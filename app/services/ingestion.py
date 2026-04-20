@@ -296,7 +296,6 @@ async def run_daily_ingestion(
             classification = ClassificationResult(
                 label=ConfidenceLabel.UNSURE,
                 reason=f"Classification error — needs manual review: {exc}",
-                matching_criteria=["none"],
             )
         classifications[nct_id] = classification
         await emit({
@@ -310,7 +309,7 @@ async def run_daily_ingestion(
     to_summarize = [
         td for td in fetched
         if classifications.get(td.get("nct_id"), ClassificationResult(
-            label=ConfidenceLabel.REJECT, reason="", matching_criteria=[]
+            label=ConfidenceLabel.REJECT, reason=""
         )).label != ConfidenceLabel.REJECT
     ]
     to_reject = [
@@ -365,7 +364,6 @@ async def run_daily_ingestion(
                 ingestion_event=event,
                 ai_relevance_label=classification.label.value,
                 ai_relevance_reason=classification.reason,
-                ai_matching_criteria=json.dumps(classification.matching_criteria),
                 previous_approved_at=approval_history.get("approved_at"),
                 previous_approved_by=approval_history.get("approved_by"),
                 previous_official_snapshot=json.dumps(snapshot) if snapshot else None,
