@@ -12,6 +12,10 @@ export interface TrialListItem {
   ingestion_event: IngestionEvent | null;
   last_update_post_date: string | null;
   ai_relevance_label: 'confident' | 'unsure' | 'reject' | null;
+  location_country: string | null;
+  location_city: string | null;
+  custom_location_country: string | null;
+  custom_location_city: string | null;
 }
 
 export interface TrialDetail {

@@ -526,6 +526,9 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
               {response.items.map((trial: TrialListItem) => {
                 const statusDisplay = getOverallStatusDisplay(trial.overall_status);
                 const summary = trial.custom_brief_summary || trial.brief_summary;
+                const city = trial.custom_location_city ?? trial.location_city;
+                const country = trial.custom_location_country ?? trial.location_country;
+                const location = [city, country].filter(Boolean).join(', ');
                 return (
                   <li
                     key={trial.nct_id}
@@ -539,6 +542,9 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
                       <p className="text-xs text-gray-500 leading-relaxed mb-2 line-clamp-2">
                         {summary}
                       </p>
+                    )}
+                    {location && (
+                      <p className="text-xs text-gray-400 mb-2">{location}</p>
                     )}
                     <div className="flex flex-wrap items-center gap-2">
                       {trial.overall_status && (

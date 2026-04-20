@@ -66,6 +66,10 @@ class TrialListItem(BaseModel):
     ingestion_event: Optional[IngestionEvent]
     last_update_post_date: Optional[str]
     ai_relevance_label: Optional[str]
+    location_country: Optional[str]
+    location_city: Optional[str]
+    custom_location_country: Optional[str]
+    custom_location_city: Optional[str]
 
 
 class TrialDetail(BaseModel):
