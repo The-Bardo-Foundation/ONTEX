@@ -248,11 +248,18 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
     }, 300);
   }
 
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
+
   function setFilter(key: keyof GetTrialsParams, value: string) {
     setParams((p) => ({ ...p, [key]: value || undefined, page: 1 }));
   }
 
   function switchTab(tab: 'relevant' | 'irrelevant') {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
     setActiveTab(tab);
     setSearchInput('');
     setParams((p) => ({ ...p, q: undefined, page: 1 }));
