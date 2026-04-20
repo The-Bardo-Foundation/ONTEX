@@ -1,6 +1,3 @@
-import json
-from unittest.mock import AsyncMock
-
 import pytest
 
 from app.db.models import ClinicalTrial, IngestionEvent, TrialStatus
@@ -523,83 +520,64 @@ async def test_get_trials_sort_brief_title(test_client, db_engine):
     assert items[1]["brief_title"] == "Zebra Trial"
 
 
-def _parse_sse_events(raw_text: str) -> list[dict]:
-    events = []
-    for line in raw_text.splitlines():
-        if line.startswith("data: "):
-            events.append(json.loads(line[6:]))
-    return events
-
+# ── POST /ingestion/start + GET /ingestion/status ─────────────────────────────
 
 @pytest.mark.asyncio
-async def test_ingestion_run_stream_rejects_unauthenticated_when_auth_enabled(test_client, monkeypatch):
+async def test_ingestion_start_rejects_unauthenticated(test_client, monkeypatch):
     monkeypatch.delenv("SKIP_AUTH_FOR_TESTS", raising=False)
-    r = await test_client.get("/api/v1/ingestion/run-stream")
+    r = await test_client.post("/api/v1/ingestion/start")
     assert r.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_ingestion_run_stream_returns_error_event_when_already_running(test_client, monkeypatch):
-    import app.api.endpoints as endpoints
-
-    release_mock = AsyncMock(return_value=None)
-    monkeypatch.setattr(endpoints, "_try_acquire_ingestion_lock", AsyncMock(return_value=False))
-    monkeypatch.setattr(endpoints, "_release_ingestion_lock", release_mock)
-
-    r = await test_client.get(
-        "/api/v1/ingestion/run-stream",
+async def test_ingestion_start_returns_started_true(test_client):
+    r = await test_client.post(
+        "/api/v1/ingestion/start",
         headers={"Authorization": "Bearer test-token"},
     )
     assert r.status_code == 200
-    events = _parse_sse_events(r.text)
-    assert len(events) == 1
-    assert events[0]["step"] == "error"
-    assert "already running" in events[0]["message"].lower()
-    release_mock.assert_not_called()
+    assert r.json() == {"started": True}
 
 
 @pytest.mark.asyncio
-async def test_ingestion_run_stream_emits_progress_and_complete_events(test_client, monkeypatch):
+async def test_ingestion_start_returns_409_when_already_running(test_client):
     import app.api.endpoints as endpoints
-    import app.services.ingestion as ingestion
-
-    async def fake_run_daily_ingestion(progress_callback=None):
-        if progress_callback:
-            await progress_callback({"step": "progress", "message": "started"})
-
-    monkeypatch.setattr(endpoints, "_try_acquire_ingestion_lock", AsyncMock(return_value=True))
-    monkeypatch.setattr(endpoints, "_release_ingestion_lock", AsyncMock(return_value=None))
-    monkeypatch.setattr(ingestion, "run_daily_ingestion", fake_run_daily_ingestion)
-
-    r = await test_client.get(
-        "/api/v1/ingestion/run-stream",
-        headers={"Authorization": "Bearer test-token"},
-    )
-    assert r.status_code == 200
-    events = _parse_sse_events(r.text)
-    steps = [event["step"] for event in events]
-    assert "progress" in steps
-    assert "complete" in steps
+    await endpoints._ingestion_lock.acquire()
+    try:
+        r = await test_client.post(
+            "/api/v1/ingestion/start",
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert r.status_code == 409
+    finally:
+        endpoints._ingestion_lock.release()
 
 
 @pytest.mark.asyncio
-async def test_ingestion_run_stream_emits_error_without_complete_on_failure(test_client, monkeypatch):
+async def test_ingestion_status_returns_state(test_client):
     import app.api.endpoints as endpoints
-    import app.services.ingestion as ingestion
-
-    async def failing_run_daily_ingestion(progress_callback=None):
-        raise RuntimeError("ingestion failed")
-
-    monkeypatch.setattr(endpoints, "_try_acquire_ingestion_lock", AsyncMock(return_value=True))
-    monkeypatch.setattr(endpoints, "_release_ingestion_lock", AsyncMock(return_value=None))
-    monkeypatch.setattr(ingestion, "run_daily_ingestion", failing_run_daily_ingestion)
-
+    import copy
+    endpoints._ingestion_status.update({
+        "running": False,
+        "steps": copy.deepcopy(endpoints._STEP_TEMPLATE),
+        "error": None,
+        "summary": None,
+    })
     r = await test_client.get(
-        "/api/v1/ingestion/run-stream",
+        "/api/v1/ingestion/status",
         headers={"Authorization": "Bearer test-token"},
     )
     assert r.status_code == 200
-    events = _parse_sse_events(r.text)
-    steps = [event["step"] for event in events]
-    assert "error" in steps
-    assert "complete" not in steps
+    body = r.json()
+    assert body["running"] is False
+    assert body["error"] is None
+    assert body["summary"] is None
+    assert len(body["steps"]) == 4
+    assert all(s["state"] == "waiting" for s in body["steps"])
+
+
+@pytest.mark.asyncio
+async def test_ingestion_status_rejects_unauthenticated(test_client, monkeypatch):
+    monkeypatch.delenv("SKIP_AUTH_FOR_TESTS", raising=False)
+    r = await test_client.get("/api/v1/ingestion/status")
+    assert r.status_code == 401
