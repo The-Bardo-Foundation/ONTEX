@@ -140,6 +140,9 @@ export function IngestionDashboardModal({ onClose }: { onClose: () => void }) {
     setErrorMsg(null);
     setSummary(null);
     setDone(false);
+    // Re-arm the gate so a stale summary from a previous run can't match
+    // before /start has cleared it on the backend.
+    sawRunningRef.current = false;
     try {
       const res = await fetch(`${API_URL}/ingestion/start`, {
         method: 'POST',
@@ -148,6 +151,12 @@ export function IngestionDashboardModal({ onClose }: { onClose: () => void }) {
       if (!res.ok && res.status !== 409) {
         setErrorMsg(`Failed to start: ${res.status}`);
         setDone(true);
+      } else {
+        // /start clears the backend summary before returning, so any
+        // non-null summary we see from here on belongs to this run —
+        // including sub-poll-tick runs that finish before we observe
+        // running=true.
+        sawRunningRef.current = true;
       }
     } catch {
       setErrorMsg('Could not reach server.');
