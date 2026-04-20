@@ -432,9 +432,14 @@ async def run_daily_ingestion(
         for trial_data in to_reject:
             nct_id = trial_data.get("nct_id")
             classification = classifications[nct_id]
+            event = IngestionEvent.UPDATED if nct_id in updated_nct_ids else IngestionEvent.NEW
             irrelevant = IrrelevantTrial(
                 **trial_data,
-                irrelevance_reason=classification.reason,
+                ai_relevance_label=classification.label.value,
+                ai_relevance_reason=classification.reason,
+                rejected_at=datetime.utcnow(),
+                rejected_by=None,
+                ingestion_event=event,
             )
             await db.merge(irrelevant)
 

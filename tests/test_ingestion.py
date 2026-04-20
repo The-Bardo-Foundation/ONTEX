@@ -347,7 +347,7 @@ async def test_rejected_trial_reeval_moved_to_clinical_trials(tmp_path, monkeypa
             nct_id="NCT44444444",
             brief_title="Old Irrelevant Trial",
             last_update_post_date="2024-01-01",
-            irrelevance_reason="Not osteosarcoma-related",
+            ai_relevance_reason="Not osteosarcoma-related",
         )
         db.add(existing)
         await db.commit()
@@ -402,7 +402,7 @@ async def test_rejected_trial_same_date_not_reevaluated(tmp_path, monkeypatch):
             nct_id="NCT55555555",
             brief_title="Still Irrelevant",
             last_update_post_date="2024-01-01",
-            irrelevance_reason="Not relevant",
+            ai_relevance_reason="Not relevant",
         )
         db.add(existing)
         await db.commit()

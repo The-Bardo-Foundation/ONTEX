@@ -253,7 +253,12 @@ class IrrelevantTrialDetail(BaseModel):
     custom_eligibility_criteria: Optional[str]
     custom_intervention_description: Optional[str]
     custom_last_update_post_date: Optional[str]
-    irrelevance_reason: Optional[str]
+    ai_relevance_label: Optional[str]
+    ai_relevance_reason: Optional[str]
+    rejected_at: Optional[datetime]
+    rejected_by: Optional[str]
+    reviewer_notes: Optional[str]
+    ingestion_event: Optional[str]
 
 
 class TrialsListResponse(BaseModel):
@@ -272,7 +277,9 @@ class IrrelevantTrialListItem(BaseModel):
     overall_status: Optional[str]
     brief_summary: Optional[str]
     last_update_post_date: Optional[str]
-    irrelevance_reason: Optional[str]
+    ai_relevance_reason: Optional[str]
+    rejected_by: Optional[str]
+    rejected_at: Optional[datetime]
 
 
 class IrrelevantTrialsListResponse(BaseModel):
@@ -667,28 +674,34 @@ async def approve_trial(
     return trial
 
 
-@router.patch("/trials/{nct_id}/reject", response_model=TrialDetail)
+@router.patch("/trials/{nct_id}/reject", response_model=IrrelevantTrialDetail)
 async def reject_trial(
     nct_id: str,
     body: RejectBody,
     _user: dict = Depends(clerk_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Reject a trial.  Sets status=REJECTED and records rejected_by/rejected_at."""
+    """Reject a trial. Atomically moves it from clinical_trials to irrelevant_trials."""
     stmt = select(ClinicalTrial).where(ClinicalTrial.nct_id == nct_id)
     result = await db.execute(stmt)
     trial = result.scalars().first()
     if not trial:
         raise HTTPException(status_code=404, detail="Trial not found")
 
-    trial.status = TrialStatus.REJECTED
-    trial.rejected_at = datetime.utcnow()
-    trial.rejected_by = _user.get("email") or _user.get("sub")
-    trial.reviewer_notes = body.reviewer_notes
-
+    irrelevant = IrrelevantTrial(
+        **{f: getattr(trial, f) for f in _BASE_FIELDS},
+        ai_relevance_label=trial.ai_relevance_label,
+        ai_relevance_reason=trial.ai_relevance_reason,
+        ingestion_event=trial.ingestion_event,
+        rejected_at=datetime.utcnow(),
+        rejected_by=_user.get("email") or _user.get("sub"),
+        reviewer_notes=body.reviewer_notes,
+    )
+    db.add(irrelevant)
+    await db.delete(trial)
     await db.commit()
-    await db.refresh(trial)
-    return trial
+    await db.refresh(irrelevant)
+    return irrelevant
 
 
 @router.patch("/trials/{nct_id}/edit", response_model=TrialDetail)
@@ -730,7 +743,12 @@ async def mark_trial_irrelevant(
 
     irrelevant = IrrelevantTrial(
         **{f: getattr(trial, f) for f in _BASE_FIELDS},
-        irrelevance_reason=body.irrelevance_reason,
+        ai_relevance_label=trial.ai_relevance_label,
+        ai_relevance_reason=trial.ai_relevance_reason,
+        ingestion_event=trial.ingestion_event,
+        rejected_at=datetime.utcnow(),
+        rejected_by=_user.get("email") or _user.get("sub"),
+        reviewer_notes=body.irrelevance_reason,
     )
     db.add(irrelevant)
     await db.delete(trial)

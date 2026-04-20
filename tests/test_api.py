@@ -353,7 +353,8 @@ async def test_reject_sets_rejected_at_and_by(test_client, db_engine):
     )
     assert r.status_code == 200
     body = r.json()
-    assert body["status"] == "REJECTED"
+    # Trial is now in irrelevant_trials — no status field on response
+    assert "status" not in body
     assert body["rejected_by"] == "admin@local"
     assert body["rejected_at"] is not None
     assert body["reviewer_notes"] == "Not relevant."

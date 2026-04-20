@@ -33,10 +33,8 @@ export function TrialDetailPage() {
 
   async function handleReject(reviewerNotes: string) {
     if (!nct_id) return;
-    const updated = await rejectTrial(nct_id, {
-      reviewer_notes: reviewerNotes || undefined,
-    });
-    setDetail(updated);
+    await rejectTrial(nct_id, { reviewer_notes: reviewerNotes || undefined });
+    navigate('/trials');
   }
 
   async function handleEdit(edits: CustomEdits) {

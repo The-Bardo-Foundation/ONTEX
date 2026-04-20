@@ -139,7 +139,12 @@ export interface IrrelevantTrialDetail {
   custom_eligibility_criteria: string | null;
   custom_intervention_description: string | null;
   custom_last_update_post_date: string | null;
-  irrelevance_reason: string | null;
+  ai_relevance_label: string | null;
+  ai_relevance_reason: string | null;
+  rejected_at: string | null;
+  rejected_by: string | null;
+  reviewer_notes: string | null;
+  ingestion_event: IngestionEvent | null;
 }
 
 export interface MarkIrrelevantBody {
