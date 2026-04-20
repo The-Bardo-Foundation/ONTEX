@@ -485,7 +485,19 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
                 {irrelevantResponse.items.map((trial: IrrelevantTrialListItem) => {
                   const statusDisplay = getOverallStatusDisplay(trial.overall_status);
                   return (
-                    <li key={trial.nct_id} onClick={() => setSelectedIrrelevantId(trial.nct_id)} className="px-6 py-4 hover:bg-gray-50 cursor-pointer transition-colors">
+                    <li
+                      key={trial.nct_id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setSelectedIrrelevantId(trial.nct_id)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          setSelectedIrrelevantId(trial.nct_id);
+                        }
+                      }}
+                      className="px-6 py-4 hover:bg-gray-50 cursor-pointer transition-colors"
+                    >
                       <p className="text-sm font-semibold text-gray-900 leading-snug mb-1">
                         {trial.brief_title}
                       </p>
