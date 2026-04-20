@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { Link, NavLink } from 'react-router-dom';
 import { SignInButton, UserButton, useAuth } from '@clerk/clerk-react';
-import { IngestionProgressModal } from './IngestionProgressModal';
+import { IngestionDashboardModal } from './IngestionDashboardModal';
 
 type LayoutVariant = 'public' | 'admin';
 
@@ -85,7 +85,7 @@ export function Layout({
             onClick={() => setShowIngestion(true)}
             className="w-full px-3 py-2 text-xs font-medium rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
           >
-            Run Ingestion
+            Ingestion
           </button>
         </div>
       </nav>
@@ -93,7 +93,7 @@ export function Layout({
       <main className="flex-1 overflow-hidden">{children}</main>
 
       {showIngestion && (
-        <IngestionProgressModal onClose={() => setShowIngestion(false)} />
+        <IngestionDashboardModal onClose={() => setShowIngestion(false)} />
       )}
     </div>
   );
