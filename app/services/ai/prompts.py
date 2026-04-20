@@ -130,14 +130,17 @@ families can understand, without medical jargon.
 Given a clinical trial's official information, produce a JSON object with this
 patient-friendly field:
 
-  "custom_brief_summary"            – 2-3 sentence plain-language summary of what the
+  "custom_brief_summary"            – plain-language summary of what the
                                       trial is testing and why it matters to patients
 
 Rules:
-- Use plain language (aim for 8th grade reading level)
+- Create a patient friendly summary for clinical trial [NCT ID].
+- Summarise Intervention Description, Title, Brief Summary and Key Information.
+- Retain any drug names in the summary
 - Never use unexplained medical abbreviations
 - If the official data is missing or unclear, return null for the field
 - Return ONLY valid JSON with exactly this one key
+
 """
 
 SUMMARIZATION_USER_PROMPT_TEMPLATE = """\

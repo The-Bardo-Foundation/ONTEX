@@ -78,3 +78,32 @@ export const rejectTrial = async (nct_id: string, body: RejectBody): Promise<Tri
   const response = await api.patch<TrialDetail>(`/trials/${nct_id}/reject`, body);
   return response.data;
 };
+
+export interface IrrelevantTrialListItem {
+  nct_id: string;
+  brief_title: string;
+  phase: string | null;
+  overall_status: string | null;
+  brief_summary: string | null;
+  last_update_post_date: string | null;
+  irrelevance_reason: string | null;
+}
+
+export interface IrrelevantTrialsListResponse {
+  items: IrrelevantTrialListItem[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface GetIrrelevantTrialsParams {
+  q?: string;
+  sort_by?: string;
+  page?: number;
+  page_size?: number;
+}
+
+export const getIrrelevantTrials = async (params: GetIrrelevantTrialsParams = {}): Promise<IrrelevantTrialsListResponse> => {
+  const response = await api.get<IrrelevantTrialsListResponse>('/irrelevant-trials', { params });
+  return response.data;
+};
