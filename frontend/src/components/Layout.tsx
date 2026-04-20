@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Link, NavLink } from 'react-router-dom';
 import { SignInButton, UserButton, useAuth } from '@clerk/clerk-react';
 import { IngestionDashboardModal } from './IngestionDashboardModal';
+import { FeedbackButton } from './FeedbackButton';
 
 type LayoutVariant = 'public' | 'admin';
 
@@ -55,6 +56,7 @@ export function Layout({
           </div>
         </nav>
         <main className="flex-1">{children}</main>
+        <FeedbackButton />
       </div>
     );
   }
