@@ -302,26 +302,47 @@ async def run_daily_ingestion(
     clinical_skipped = len(unchanged_clinical)
     rejected_skipped = len(unchanged_rejected)
 
+    def _build_sync_values(nct_id: str, td: dict) -> dict:
+        """Construct the column→value dict for a Step 3.6 silent sync.
+
+        Always overwrites every official_* column with the freshly-fetched
+        value. For each ignored field that has a `custom_*` mirror column,
+        the mirror is ALSO synced — but only when the admin hasn't manually
+        edited it. "Not edited" = the stored custom value is None or still
+        equals the previous official snapshot (i.e. it's a passthrough). This
+        prevents stale `custom_location_*` / `custom_central_contact_*` /
+        `custom_last_update_post_date` from being served by the public-facing
+        WordPress template, which prefers `custom_*` when non-empty.
+        """
+        values = {f: td.get(f) for f in _SNAPSHOT_FIELDS}
+        snapshot = existing_snapshot_map.get(nct_id, {})
+        protected = existing_custom_map.get(nct_id, {})  # non-null customs only
+        for field in settings.IGNORED_UPDATE_FIELDS:
+            custom_field = f"custom_{field}"
+            if custom_field not in _CUSTOM_FIELDS:
+                continue
+            existing_custom = protected.get(custom_field)  # None if was null
+            existing_official = snapshot.get(field)
+            if existing_custom is None or existing_custom == existing_official:
+                values[custom_field] = td.get(field)
+        return values
+
     if unchanged_clinical or unchanged_rejected:
         skipped_ids = set(unchanged_clinical) | set(unchanged_rejected)
         fetched = [td for td in fetched if td.get("nct_id") not in skipped_ids]
 
         async with SessionLocal() as db:
             for nct_id, td in unchanged_clinical.items():
-                values = {f: td.get(f) for f in _SNAPSHOT_FIELDS}
-                values["custom_last_update_post_date"] = td.get("last_update_post_date")
                 await db.execute(
                     update(ClinicalTrial)
                     .where(ClinicalTrial.nct_id == nct_id)
-                    .values(**values)
+                    .values(**_build_sync_values(nct_id, td))
                 )
             for nct_id, td in unchanged_rejected.items():
-                values = {f: td.get(f) for f in _SNAPSHOT_FIELDS}
-                values["custom_last_update_post_date"] = td.get("last_update_post_date")
                 await db.execute(
                     update(IrrelevantTrial)
                     .where(IrrelevantTrial.nct_id == nct_id)
-                    .values(**values)
+                    .values(**_build_sync_values(nct_id, td))
                 )
             await db.commit()
 

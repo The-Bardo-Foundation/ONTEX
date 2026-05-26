@@ -387,10 +387,68 @@ async def test_updated_trial_with_only_location_change_is_skipped(tmp_path, monk
         assert trial.status == TrialStatus.APPROVED
         assert trial.last_update_post_date == "2024-09-01"
         assert trial.location_city == "Bergen"  # ignored-field change still synced
+        # custom_* mirror for an ignored field must also sync (passthrough)
+        # so the public WordPress template doesn't serve stale data.
+        assert trial.custom_location_city == "Bergen"
         run = (await db.execute(select(IngestionRun).order_by(IngestionRun.id.desc()))).scalars().first()
         assert run is not None
         assert run.skipped_unchanged == 1
         assert run.updated_trials == 0
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_step_3_6_preserves_admin_edited_custom_field(tmp_path, monkeypatch):
+    """If admin manually edited custom_location_city, Step 3.6 must NOT overwrite
+    it when silently syncing on an ignored-field-only change."""
+    engine, factory = _make_test_db(tmp_path, "test3_admin_custom.db")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    nct_id = "NCT_ADMIN_CUSTOM"
+    existing_payload = make_trial_dict(nct_id=nct_id, last_update="2024-01-01")
+    # Admin edited the custom city to something different from official
+    existing_payload["custom_location_city"] = "Stavanger (admin override)"
+
+    new_dict = make_trial_dict(nct_id=nct_id, last_update="2024-09-01")
+    new_dict["location_city"] = "Bergen"
+
+    async with factory() as db:
+        db.add(ClinicalTrial(**existing_payload, status=TrialStatus.APPROVED))
+        await db.commit()
+
+    monkeypatch.setattr("app.services.ingestion.SessionLocal", factory)
+    monkeypatch.setattr(
+        "app.services.ingestion.iter_study_index_rows",
+        lambda **kwargs: [(nct_id, "2024-09-01")],
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.fetch_full_study",
+        lambda n: {"protocolSection": {}},
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.map_api_to_model",
+        lambda raw: new_dict.copy(),
+    )
+    monkeypatch.setattr("app.services.ingestion.AIClient", lambda: _make_mock_ai_client())
+    monkeypatch.setattr(
+        "app.services.ingestion.ai_generate_summaries",
+        AsyncMock(return_value=FAKE_AI_SUMMARIES),
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.classify_trial",
+        AsyncMock(return_value=make_classification()),
+    )
+
+    from app.services.ingestion import run_daily_ingestion
+    await run_daily_ingestion(search_terms=["osteosarcoma"])
+
+    async with factory() as db:
+        trial = await db.get(ClinicalTrial, nct_id)
+        assert trial is not None
+        assert trial.location_city == "Bergen"  # official synced
+        assert trial.custom_location_city == "Stavanger (admin override)"  # preserved
 
     await engine.dispose()
 
@@ -446,6 +504,8 @@ async def test_clinical_trial_contact_change_only_skips_ai(tmp_path, monkeypatch
         assert trial is not None
         assert trial.status == TrialStatus.APPROVED
         assert trial.central_contact_phone == "+47 22222222"
+        # Mirror also synced (was a passthrough — equal to old official).
+        assert trial.custom_central_contact_phone == "+47 22222222"
 
     await engine.dispose()
 
@@ -464,7 +524,7 @@ async def test_rejected_trial_only_ignored_fields_changed_skips_ai(tmp_path, mon
     # uses ClinicalTrialBase fields so make_trial_dict is compatible.
     new_dict = make_trial_dict(nct_id=nct_id, last_update="2024-09-01")
     new_dict["location_city"] = "Trondheim"  # ignored field
-    new_dict["custom_location_city"] = "Trondheim"
+    new_dict["custom_location_city"] = "Trondheim" # ignored field
 
     async with factory() as db:
         db.add(IrrelevantTrial(
