@@ -35,6 +35,19 @@ class Settings(BaseSettings):
     AI_MODEL: str = "openai/gpt-4o-mini"
     PAGE_SIZE: int = 100
 
+    # Fields whose changes alone (i.e. nothing else differs) do NOT warrant
+    # re-classification or re-summarisation when a trial is re-ingested.
+    # Applies to both UPDATED clinical_trials and re-evaluated irrelevant_trials.
+    # Overridable via env var: IGNORED_UPDATE_FIELDS='["last_update_post_date","location_city"]'
+    IGNORED_UPDATE_FIELDS: list[str] = [
+        "last_update_post_date",
+        "location_country",
+        "location_city",
+        "central_contact_name",
+        "central_contact_phone",
+        "central_contact_email",
+    ]
+
     model_config = SettingsConfigDict(
         env_file=get_env_file(), env_ignore_empty=True, extra="ignore"
     )
