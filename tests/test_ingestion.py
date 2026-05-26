@@ -464,6 +464,7 @@ async def test_rejected_trial_only_ignored_fields_changed_skips_ai(tmp_path, mon
     # uses ClinicalTrialBase fields so make_trial_dict is compatible.
     new_dict = make_trial_dict(nct_id=nct_id, last_update="2024-09-01")
     new_dict["location_city"] = "Trondheim"  # ignored field
+    new_dict["custom_location_city"] = "Trondheim"
 
     async with factory() as db:
         db.add(IrrelevantTrial(
