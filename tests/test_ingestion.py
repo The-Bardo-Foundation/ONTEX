@@ -409,6 +409,7 @@ async def test_clinical_trial_contact_change_only_skips_ai(tmp_path, monkeypatch
 
     new_dict = make_trial_dict(nct_id=nct_id, last_update="2024-09-01")
     new_dict["central_contact_phone"] = "+47 22222222"
+    new_dict["custom_central_contact_phone"] = "+47 22222222"
 
     async with factory() as db:
         db.add(ClinicalTrial(**existing_payload, status=TrialStatus.APPROVED))
