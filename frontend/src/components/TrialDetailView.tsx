@@ -183,7 +183,7 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
                       rel="noopener noreferrer"
                       className="text-blue-600 hover:underline"
                     >
-                      View ClinicalTrials.gov for details.
+                      View trial on ClinicalTrials.gov
                     </a>
                   </p>
                 )}
