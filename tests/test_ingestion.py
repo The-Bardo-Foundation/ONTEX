@@ -347,6 +347,7 @@ async def test_updated_trial_with_only_location_change_is_skipped(tmp_path, monk
     new_dict = make_trial_dict(nct_id=nct_id, last_update="2024-09-01")
     # API now reports a different city + new date, everything else identical
     new_dict["location_city"] = "Bergen"
+    new_dict["custom_location_city"] = "Bergen"
 
     async with factory() as db:
         existing_payload = make_trial_dict(nct_id=nct_id, last_update="2024-01-01")
