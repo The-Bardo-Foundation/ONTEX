@@ -14,17 +14,18 @@ Step 3.5 Capture existing custom_*/snapshot/approval state so re-ingestion
 Step 3.6 Skip both UPDATED clinical_trials AND re-evaluated irrelevant_trials
          whose only changes are in settings.IGNORED_UPDATE_FIELDS (e.g. date,
          location, contact info). Affected rows have their official_* fields
-         silently synced — no AI re-classification, no status reset.
+         silently synced - no AI re-classification, no status reset.
 Step 4  Classify relevance with AI (confident / unsure / reject)
 Step 5  Generate patient-friendly custom_* fields via AI summarisation (confident/unsure only)
-Step 6  Upsert into clinical_trials or irrelevant_trials
-Step 7  Re-evaluate previously rejected trials whose data has changed
-Step 8  Log run summary
+Step 6  Upsert into clinical_trials or irrelevant_trials; promote previously-
+        rejected NCTs to clinical_trials (and delete their IrrelevantTrial row)
+        when AI now classifies them as relevant - and vice versa
+Step 7  Log run summary
 
 TABLES
 ======
-ClinicalTrial   — relevant trials (status: PENDING_REVIEW / APPROVED / REJECTED)
-IrrelevantTrial — trials the AI marked irrelevant (kept for deduplication)
+ClinicalTrial   - relevant trials (status: PENDING_REVIEW / APPROVED / REJECTED)
+IrrelevantTrial - trials the AI marked irrelevant (kept for deduplication)
 
 Both share ClinicalTrialBase fields (nct_id is primary key).
 
@@ -137,10 +138,10 @@ async def run_daily_ingestion(
 
         new_trials.append(nct_id)
 
-    # ──────────────────────────────────────────────────────────
-    # STEP 7 prep — Determine which rejected trials need re-evaluation
-    # (done here so reeval_list can extend trials_to_process before Step 3)
-    # ──────────────────────────────────────────────────────────
+    # Filter rejected candidates by date diff: only those whose CT.gov
+    # last_update_post_date has advanced since we last stored them are worth
+    # re-fetching. Their fetch + classify happens in the shared Steps 3–6
+    # path below (no dedicated reeval block).
     reeval_list = [
         nct_id
         for nct_id, api_date, stored_date in rejected_hits
@@ -486,7 +487,7 @@ async def run_daily_ingestion(
         await db.commit()
 
     # ──────────────────────────────────────────────────────────
-    # STEP 8 — Write ingestion run record + log summary
+    # STEP 7 — Write ingestion run record + log summary
     # ──────────────────────────────────────────────────────────
     updated_trials_count = len(updated_trials) - clinical_skipped
     reeval_trials_count = len(reeval_list) - rejected_skipped
