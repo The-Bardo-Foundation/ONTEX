@@ -311,9 +311,7 @@ async def run_daily_ingestion(
         the mirror is ALSO synced — but only when the admin hasn't manually
         edited it. "Not edited" = the stored custom value is None or still
         equals the previous official snapshot (i.e. it's a passthrough). This
-        prevents stale `custom_location_*` / `custom_central_contact_*` /
-        `custom_last_update_post_date` from being served by the public-facing
-        WordPress template, which prefers `custom_*` when non-empty.
+        prevents stale `custom_*` fields from being served.
         """
         values = {f: td.get(f) for f in _SNAPSHOT_FIELDS}
         snapshot = existing_snapshot_map.get(nct_id, {})
