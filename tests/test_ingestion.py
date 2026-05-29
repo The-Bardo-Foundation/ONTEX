@@ -431,24 +431,29 @@ async def test_step_3_6_preserves_admin_edited_custom_field(tmp_path, monkeypatc
         "app.services.ingestion.map_api_to_model",
         lambda raw: new_dict.copy(),
     )
+    classify_mock = AsyncMock(return_value=make_classification())
+    summarize_mock = AsyncMock(return_value=FAKE_AI_SUMMARIES)
+
     monkeypatch.setattr("app.services.ingestion.AIClient", lambda: _make_mock_ai_client())
-    monkeypatch.setattr(
-        "app.services.ingestion.ai_generate_summaries",
-        AsyncMock(return_value=FAKE_AI_SUMMARIES),
-    )
-    monkeypatch.setattr(
-        "app.services.ingestion.classify_trial",
-        AsyncMock(return_value=make_classification()),
-    )
+    monkeypatch.setattr("app.services.ingestion.ai_generate_summaries", summarize_mock)
+    monkeypatch.setattr("app.services.ingestion.classify_trial", classify_mock)
 
     from app.services.ingestion import run_daily_ingestion
     await run_daily_ingestion(search_terms=["osteosarcoma"])
+
+    # Only an ignored field (location_city) changed → skip path. AI must NOT rerun.
+    classify_mock.assert_not_awaited()
+    summarize_mock.assert_not_awaited()
 
     async with factory() as db:
         trial = await db.get(ClinicalTrial, nct_id)
         assert trial is not None
         assert trial.location_city == "Bergen"  # official synced
         assert trial.custom_location_city == "Stavanger (admin override)"  # preserved
+        run = (await db.execute(select(IngestionRun).order_by(IngestionRun.id.desc()))).scalars().first()
+        assert run is not None
+        assert run.skipped_unchanged == 1
+        assert run.updated_trials == 0
 
     await engine.dispose()
 
