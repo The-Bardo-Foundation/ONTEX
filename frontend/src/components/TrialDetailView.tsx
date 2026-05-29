@@ -164,17 +164,30 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
 
             {/* Column 3 */}
             <div className="space-y-5">
-              {(contact || phone || email) && (
-                <InfoField label="Key Contact">
-                  {contact && <p>{contact}</p>}
-                  {phone   && <p className="text-gray-500">{phone}</p>}
-                  {email   && (
-                    <a href={`mailto:${email}`} className="text-blue-600 hover:underline break-all">
-                      {email}
+              <InfoField label="Key Contact">
+                {(contact || phone || email) ? (
+                  <>
+                    {contact && <p>{contact}</p>}
+                    {phone   && <p className="text-gray-500">{phone}</p>}
+                    {email   && (
+                      <a href={`mailto:${email}`} className="text-blue-600 hover:underline break-all">
+                        {email}
+                      </a>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-gray-500">
+                    <a
+                      href={`https://clinicaltrials.gov/study/${trial.nct_id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:underline"
+                    >
+                      View trial on ClinicalTrials.gov
                     </a>
-                  )}
-                </InfoField>
-              )}
+                  </p>
+                )}
+              </InfoField>
               <InfoField label="Clinical Trial ID">
                 <span className="font-mono">{trial.nct_id}</span>
               </InfoField>
