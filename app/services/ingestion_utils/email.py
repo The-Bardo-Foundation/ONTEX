@@ -77,3 +77,29 @@ async def send_ingestion_summary(summary: dict[str, Any]) -> None:
         logger.info("Ingestion summary email sent (resend response=%s)", result)
     except Exception as exc:  # noqa: BLE001 — email failure must never break ingestion
         logger.warning("Failed to send ingestion summary email: %s", exc)
+
+
+if __name__ == "__main__":
+    # Manual smoke test — run with: python -m app.services.ingestion_utils.email
+    # Requires RESEND_API_KEY + INGESTION_SUMMARY_TO to be set in your .env.
+    logging.basicConfig(level=logging.INFO)
+
+    sample_summary = {
+        "step": "complete",
+        "label": "Done (manual test)",
+        "search_terms": ["osteosarcoma"],
+        "candidates_found": 42,
+        "new": 3,
+        "updated": 1,
+        "skipped_unchanged": 5,
+        "reevaluated": 0,
+        "relevant": 2,
+        "irrelevant": 2,
+        "fetch_errors": 0,
+        "classify_errors": 0,
+    }
+
+    print(f"Sending test summary to: {settings.INGESTION_SUMMARY_TO}")
+    print(f"From: {settings.INGESTION_SUMMARY_FROM}")
+    print(f"API key configured: {bool(settings.RESEND_API_KEY)}")
+    asyncio.run(send_ingestion_summary(sample_summary))
