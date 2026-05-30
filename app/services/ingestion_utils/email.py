@@ -7,7 +7,7 @@ The actual send is delegated to Resend (https://resend.com).
 
 Recipient resolution:
 - The recipient list is fetched from Clerk via
-  `app.services.clerk_admin.get_summary_email_recipients`, which returns
+  `app.services.clerk.get_summary_email_recipients`, which returns
   every Clerk user who has explicitly opted in via
   `unsafeMetadata.emailIngestionSummary === true`. Default is opted-out, so a
   fresh Clerk user receives nothing until they enable the toggle from their
@@ -34,7 +34,7 @@ import logging
 from typing import Any
 
 from app.core.config import settings
-from app.services.clerk_admin import get_summary_email_recipients
+from app.services.clerk import get_summary_email_recipients
 
 logger = logging.getLogger(__name__)
 
