@@ -43,8 +43,9 @@ class Settings(BaseSettings):
     RESEND_API_KEY: str = ""
     INGESTION_SUMMARY_FROM: str = ""
 
-    # Clerk Backend API — used to list users and resolve email recipients.
-    # The same key powers Clerk JWT verification (see app/api/middleware.py).
+    # Clerk Backend API secret — used to list users and resolve email
+    # recipients via the Clerk Backend API (see app/services/clerk/recipients.py).
+    # JWT verification uses JWKS (see app/api/middleware.py) and does not need this.
     CLERK_SECRET_KEY: str = ""
 
     model_config = SettingsConfigDict(
