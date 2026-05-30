@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     # unsafeMetadata.emailIngestionSummary === true receives the email (default
     # is opted-out). See app/services/clerk_admin.py.
     RESEND_API_KEY: str = ""
-    INGESTION_SUMMARY_FROM: str = "onboarding@resend.dev"
+    INGESTION_SUMMARY_FROM: str = ""
 
     # Clerk Backend API — used to list users and resolve email recipients.
     # The same key powers Clerk JWT verification (see app/api/middleware.py).
