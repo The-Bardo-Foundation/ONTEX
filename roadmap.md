@@ -235,6 +235,7 @@ A separate **All Trials** page (existing Approved/Rejected tabs):
 - Ingestion pipeline progress tracking added (`progress_callback` parameter)
 - New SSE endpoint `GET /api/v1/ingestion/run-stream` — streams step-by-step progress
 - `IngestionProgressModal` component with per-step progress bars and final summary
+- Daily ingestion summary email recipients now resolved from Clerk users (opt-in via `unsafeMetadata.emailIngestionSummary`) — replaces the static `INGESTION_SUMMARY_TO` env var. Toggle lives in `<UserButton/>` → Notifications. Default is opted-OUT.
 
 #### Remaining in Phase 4
 

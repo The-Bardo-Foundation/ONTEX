@@ -35,6 +35,19 @@ class Settings(BaseSettings):
     AI_MODEL: str = "openai/gpt-4o-mini"
     PAGE_SIZE: int = 100
 
+    # Email notifications (Resend) — used to send daily ingestion summaries.
+    # If RESEND_API_KEY is empty, the summary email step is silently skipped.
+    # Recipients are resolved at send time from Clerk: every user whose
+    # unsafeMetadata.emailIngestionSummary === true receives the email (default
+    # is opted-out). See app/services/clerk/recipients.py.
+    RESEND_API_KEY: str = ""
+    INGESTION_SUMMARY_FROM: str = ""
+
+    # Clerk Backend API secret — used to list users and resolve email
+    # recipients via the Clerk Backend API (see app/services/clerk/recipients.py).
+    # JWT verification uses JWKS (see app/api/middleware.py) and does not need this.
+    CLERK_SECRET_KEY: str = ""
+
     model_config = SettingsConfigDict(
         env_file=get_env_file(), env_ignore_empty=True, extra="ignore"
     )
