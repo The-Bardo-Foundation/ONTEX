@@ -5,10 +5,21 @@ Email notifications for the daily ingestion pipeline.
 to email a short summary of the run (counts of new/updated/relevant/etc).
 The actual send is delegated to Resend (https://resend.com).
 
+Recipient resolution:
+- The recipient list is fetched from Clerk via
+  `app.services.clerk_admin.get_summary_email_recipients`, which returns
+  every Clerk user who has explicitly opted in via
+  `unsafeMetadata.emailIngestionSummary === true`. Default is opted-out, so a
+  fresh Clerk user receives nothing until they enable the toggle from their
+  account page.
+
 Behaviour:
 - If `settings.RESEND_API_KEY` is empty/unset, the function logs a debug
   message and returns silently. This keeps local development friction-free
   for developers who don't have email credentials.
+- If no Clerk user has opted in (or the Clerk lookup fails), the function
+  logs and returns without sending — an empty recipient list must never
+  raise.
 - The send is performed in a thread pool via `asyncio.to_thread` because
   the `resend` SDK is synchronous and would otherwise block the event loop.
 - All exceptions raised by Resend are caught and logged. A failed summary
@@ -23,6 +34,7 @@ import logging
 from typing import Any
 
 from app.core.config import settings
+from app.services.clerk_admin import get_summary_email_recipients
 
 logger = logging.getLogger(__name__)
 
@@ -61,14 +73,17 @@ async def send_ingestion_summary(summary: dict[str, Any]) -> None:
         logger.debug("RESEND_API_KEY not set — skipping ingestion summary email")
         return
 
-    if not settings.INGESTION_SUMMARY_TO:
-        logger.debug("INGESTION_SUMMARY_TO is empty — skipping ingestion summary email")
+    recipients = await get_summary_email_recipients()
+    if not recipients:
+        logger.debug(
+            "No Clerk users opted in to ingestion summary — skipping email"
+        )
         return
 
     payload = {
         "from": settings.INGESTION_SUMMARY_FROM,
-        "to": list(settings.INGESTION_SUMMARY_TO),
-        "subject": "ONTEX — daily ingestion summary",
+        "to": recipients,
+        "subject": "!!Test!! - ONTEX — daily ingestion summary",
         "html": _format_html(summary),
     }
 
@@ -81,7 +96,8 @@ async def send_ingestion_summary(summary: dict[str, Any]) -> None:
 
 if __name__ == "__main__":
     # Manual smoke test — run with: python -m app.services.ingestion_utils.email
-    # Requires RESEND_API_KEY + INGESTION_SUMMARY_TO to be set in your .env.
+    # Requires RESEND_API_KEY + CLERK_SECRET_KEY to be set in your .env, and at
+    # least one Clerk user with unsafeMetadata.emailIngestionSummary === true.
     logging.basicConfig(level=logging.INFO)
 
     sample_summary = {
@@ -99,7 +115,11 @@ if __name__ == "__main__":
         "classify_errors": 0,
     }
 
-    print(f"Sending test summary to: {settings.INGESTION_SUMMARY_TO}")
-    print(f"From: {settings.INGESTION_SUMMARY_FROM}")
-    print(f"API key configured: {bool(settings.RESEND_API_KEY)}")
-    asyncio.run(send_ingestion_summary(sample_summary))
+    async def _smoke() -> None:
+        recipients = await get_summary_email_recipients()
+        print(f"Resolved recipients from Clerk: {recipients}")
+        print(f"From: {settings.INGESTION_SUMMARY_FROM}")
+        print(f"Resend API key configured: {bool(settings.RESEND_API_KEY)}")
+        await send_ingestion_summary(sample_summary)
+
+    asyncio.run(_smoke())
