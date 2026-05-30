@@ -37,9 +37,15 @@ class Settings(BaseSettings):
 
     # Email notifications (Resend) — used to send daily ingestion summaries.
     # If RESEND_API_KEY is empty, the summary email step is silently skipped.
+    # Recipients are resolved at send time from Clerk: every user whose
+    # unsafeMetadata.emailIngestionSummary === true receives the email (default
+    # is opted-out). See app/services/clerk_admin.py.
     RESEND_API_KEY: str = ""
     INGESTION_SUMMARY_FROM: str = "onboarding@resend.dev"
-    INGESTION_SUMMARY_TO: list[str] = ["knut.o.moen@gmail.com"]
+
+    # Clerk Backend API — used to list users and resolve email recipients.
+    # The same key powers Clerk JWT verification (see app/api/middleware.py).
+    CLERK_SECRET_KEY: str = ""
 
     model_config = SettingsConfigDict(
         env_file=get_env_file(), env_ignore_empty=True, extra="ignore"
