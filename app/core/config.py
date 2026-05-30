@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     # If RESEND_API_KEY is empty, the summary email step is silently skipped.
     # Recipients are resolved at send time from Clerk: every user whose
     # unsafeMetadata.emailIngestionSummary === true receives the email (default
-    # is opted-out). See app/services/clerk_admin.py.
+    # is opted-out). See app/services/clerk/recipients.py.
     RESEND_API_KEY: str = ""
     INGESTION_SUMMARY_FROM: str = ""
 
