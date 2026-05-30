@@ -19,3 +19,4 @@ pytest-asyncio>=0.23.0
 psycopg2-binary
 pre-commit
 pytest
+resend
