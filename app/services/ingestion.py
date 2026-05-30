@@ -64,6 +64,7 @@ from app.services.ai.summarizer import ai_generate_summaries
 from app.services.ctgov import iter_study_index_rows
 from app.services.ctgov.study_detail import fetch_full_study, map_api_to_model
 from app.services.ingestion_skip import is_content_unchanged
+from app.services.ingestion_utils.email import send_ingestion_summary
 
 logger = logging.getLogger(__name__)
 
@@ -211,22 +212,26 @@ async def run_daily_ingestion(
                 fetch_errors=fetch_errors,
             ))
             await db.commit()
-        await emit({
+        empty_summary = {
             "step": "complete",
             "label": "Done — no trials to process",
+            "search_terms": search_terms,
+            "candidates_found": len(all_candidates),
             "new": 0,
             "updated": 0,
             "relevant": 0,
             "irrelevant": 0,
             "fetch_errors": fetch_errors,
             "classify_errors": 0,
-        })
+        }
+        await emit(empty_summary)
         logger.info(
             "Ingestion complete: no trials to process "
             "(search_terms=%s, candidates=%d, new=%d, updated=%d, reeval=%d, fetch_errors=%d)",
             search_terms, len(all_candidates), len(new_trials),
             len(updated_trials), len(reeval_list), fetch_errors,
         )
+        await send_ingestion_summary(empty_summary)
         return
 
     # ──────────────────────────────────────────────────────────
@@ -548,19 +553,23 @@ async def run_daily_ingestion(
         ))
         await db.commit()
 
-    await emit({
+    final_summary = {
         "step": "complete",
         "label": "Done",
+        "search_terms": search_terms,
+        "candidates_found": len(all_candidates),
         "new": len(new_trials),
         "updated": updated_trials_count,
         "skipped_unchanged": skipped_unchanged_count,
+        "reevaluated": reeval_trials_count,
         "relevant": processed,
         "auto_approved": auto_approved,
         "pending_review": pending_review,
         "irrelevant": newly_irrelevant,
         "fetch_errors": fetch_errors,
         "classify_errors": classify_errors,
-    })
+    }
+    await emit(final_summary)
 
     logger.info(
         "Ingestion complete: %d new, %d updated, %d skipped (unchanged), %d re-evaluated | "
@@ -580,6 +589,8 @@ async def run_daily_ingestion(
         search_terms,
         len(all_candidates),
     )
+
+    await send_ingestion_summary(final_summary)
 
 
 if __name__ == "__main__":
