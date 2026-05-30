@@ -83,7 +83,7 @@ async def send_ingestion_summary(summary: dict[str, Any]) -> None:
     payload = {
         "from": settings.INGESTION_SUMMARY_FROM,
         "to": recipients,
-        "subject": "!!Test!! - ONTEX — daily ingestion summary",
+        "subject": "ONTEX — daily ingestion summary",
         "html": _format_html(summary),
     }
 
