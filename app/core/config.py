@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     AI_MODEL: str = "openai/gpt-4o-mini"
     PAGE_SIZE: int = 100
 
+    # Email notifications (Resend) — used to send daily ingestion summaries.
+    # If RESEND_API_KEY is empty, the summary email step is silently skipped.
+    RESEND_API_KEY: str = ""
+    INGESTION_SUMMARY_FROM: str = "onboarding@resend.dev"
+    INGESTION_SUMMARY_TO: list[str] = ["knut.o.moen@gmail.com"]
+
     model_config = SettingsConfigDict(
         env_file=get_env_file(), env_ignore_empty=True, extra="ignore"
     )
