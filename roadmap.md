@@ -103,6 +103,7 @@ Create a new function `ai_generate_summaries(client, trial_data: dict) -> dict` 
 - **Updated trial**: NCT ID already in `clinical_trials` with `status=APPROVED`, and `last_update_post_date` has changed → re-run Steps 3–5, set `status=PENDING_REVIEW`, store the previous `approved_at` timestamp and `approved_by` so reviewers can compare
 - **Previously rejected**: NCT ID in `irrelevant_trials` → re-evaluate only if `last_update_post_date` has changed; otherwise skip
 - **No change**: NCT ID already in `clinical_trials` with same `last_update_post_date` → skip
+- **Step 3.6 noise filter**: Both UPDATED clinical_trials AND re-evaluated irrelevant_trials are dropped from the AI pipeline when every non-ignored field still matches the stored snapshot. Ignored fields are listed in `settings.IGNORED_UPDATE_FIELDS` (default: `last_update_post_date`, `location_country`, `location_city`, `central_contact_*`). Affected rows have their source-backed canonical fields silently synced, and passthrough `custom_*` mirrors for ignored fields are also synced when they have not been manually edited — no status reset, no AI call. Logic lives in `app/services/ingestion_skip.py::is_content_unchanged`.
 - `approved_at`, `approved_by`, `previous_approved_at`, `previous_approved_by` columns added to `clinical_trials` (migration 003)
 
 #### 1.6 Implement `ingestion.py` Step 7 — logging and error handling ✅
