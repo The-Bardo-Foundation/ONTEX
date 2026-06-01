@@ -167,3 +167,40 @@ export interface StatisticsResponse {
   ai_confident_approval_rate: number | null;
   by_ai_label: AiLabelBreakdown[];
 }
+
+export interface TrialExample {
+  nct_id: string;
+  brief_title: string;
+  ai_relevance_label: string | null;
+  ai_relevance_reason: string | null;
+  reviewer_notes: string | null;
+  human_decision: string;
+}
+
+export interface PatternBucket {
+  dimension: string;
+  value: string;
+  approved: number;
+  rejected: number;
+}
+
+export interface InsightsResponse {
+  confident_approved: number;
+  confident_rejected: number;
+  confident_error_rate: number | null;
+  unsure_approved: number;
+  unsure_rejected: number;
+  unsure_pending: number;
+  unsure_approval_rate: number | null;
+  false_negative_count: number;
+  confident_false_positives: TrialExample[];
+  unsure_resolved: TrialExample[];
+  false_negatives: TrialExample[];
+  unsure_patterns: PatternBucket[];
+}
+
+export interface AccuracyAdvice {
+  summary: string;
+  patterns: string[];
+  recommendations: string[];
+}

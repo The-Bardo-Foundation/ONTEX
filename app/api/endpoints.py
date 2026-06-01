@@ -12,6 +12,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
 from app.db.models import ClinicalTrial, IngestionEvent, IngestionRun, IrrelevantTrial, TrialStatus
+from app.services import accuracy
+from app.services.ai.client import AIClient
+from app.services.ai.prompts import (
+    ACCURACY_ADVICE_SYSTEM_PROMPT,
+    ACCURACY_ADVICE_USER_PROMPT_TEMPLATE,
+)
+from app.services.ai.schemas import AccuracyAdvice
 
 router = APIRouter()
 
@@ -486,6 +493,107 @@ async def get_statistics(
     )
 
 
+class TrialExampleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    nct_id: str
+    brief_title: str
+    ai_relevance_label: Optional[str]
+    ai_relevance_reason: Optional[str]
+    reviewer_notes: Optional[str]
+    human_decision: str
+
+
+class PatternBucketOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    dimension: str
+    value: str
+    approved: int
+    rejected: int
+
+
+class InsightsResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    confident_approved: int
+    confident_rejected: int
+    confident_error_rate: Optional[float]
+    unsure_approved: int
+    unsure_rejected: int
+    unsure_pending: int
+    unsure_approval_rate: Optional[float]
+    false_negative_count: int
+    confident_false_positives: List[TrialExampleOut]
+    unsure_resolved: List[TrialExampleOut]
+    false_negatives: List[TrialExampleOut]
+    unsure_patterns: List[PatternBucketOut]
+
+
+@router.get("/trials/insights", response_model=InsightsResponse)
+async def get_insights(
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Accuracy insights focused on the AI classifier: the confident-trial error rate
+    (a guardrail for auto-publishing), how reviewers resolve unsure trials, false
+    negatives (AI-rejected but human-approved), and unsure patterns by trial segment.
+    """
+    insights = await accuracy.compute_insights(db)
+    return InsightsResponse.model_validate(insights)
+
+
+def _format_advice_cases(insights: accuracy.AccuracyInsights) -> str:
+    examples = (
+        insights.confident_false_positives
+        + insights.false_negatives
+        + insights.unsure_resolved
+    )
+    lines: list[str] = []
+    for ex in examples:
+        lines.append(
+            f"- Title: {ex.brief_title}\n"
+            f"  AI label: {ex.ai_relevance_label or 'unknown'}\n"
+            f"  AI reason: {ex.ai_relevance_reason or 'n/a'}\n"
+            f"  Human decision: {ex.human_decision}\n"
+            f"  Reviewer notes: {ex.reviewer_notes or 'n/a'}"
+        )
+    return "\n".join(lines)
+
+
+@router.post("/trials/insights/ai-advice", response_model=AccuracyAdvice)
+async def generate_ai_advice(
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Send classifier-vs-human disagreements to the LLM for improvement advice."""
+    insights = await accuracy.compute_insights(db)
+    cases = _format_advice_cases(insights)
+    if not cases:
+        return AccuracyAdvice(
+            summary="Not enough reviewer decisions yet to analyse. Approve or reject "
+            "more trials, then try again.",
+            patterns=[],
+            recommendations=[],
+        )
+
+    try:
+        client = AIClient()
+    except RuntimeError:
+        return AccuracyAdvice(
+            summary="AI analysis is unavailable: the AI API key is not configured.",
+            patterns=[],
+            recommendations=[],
+        )
+
+    user_prompt = ACCURACY_ADVICE_USER_PROMPT_TEMPLATE.format(cases=cases)
+    return await client.analyze_accuracy(
+        system_prompt=ACCURACY_ADVICE_SYSTEM_PROMPT,
+        user_prompt=user_prompt,
+    )
+
+
 @router.get("/trials/review-queue", response_model=List[TrialListItem])
 async def get_review_queue(
     _user: dict = Depends(clerk_user),
@@ -685,6 +793,10 @@ async def restore_irrelevant_trial(
     restored = ClinicalTrial(
         **{f: getattr(trial, f) for f in _BASE_FIELDS},
         status=TrialStatus.PENDING_REVIEW,
+        # Preserve the AI verdict so an AI-rejected trial that a human restores
+        # and later approves is detectable as a false negative.
+        ai_relevance_label=trial.ai_relevance_label,
+        ai_relevance_reason=trial.ai_relevance_reason,
     )
     db.add(restored)
     await db.delete(trial)

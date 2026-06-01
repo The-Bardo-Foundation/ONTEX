@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getStatistics } from '../api';
 import type { StatisticsResponse } from '../types';
+import { AccuracyInsights } from '../components/AccuracyInsights';
 
 const LABEL_DISPLAY: Record<string, string> = {
   confident: 'Confident',
@@ -168,6 +169,8 @@ export function StatisticsPage() {
             </div>
           </>
         )}
+
+        <AccuracyInsights />
       </div>
     </div>
   );

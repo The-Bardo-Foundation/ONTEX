@@ -4,6 +4,8 @@ import type {
   CustomEdits,
   IrrelevantTrialDetail,
   MarkIrrelevantBody,
+  AccuracyAdvice,
+  InsightsResponse,
   RejectBody,
   StatisticsResponse,
   TrialDetail,
@@ -75,6 +77,16 @@ export const getTrialFacets = async (): Promise<TrialFacets> => {
 
 export const getStatistics = async (): Promise<StatisticsResponse> => {
   const response = await api.get<StatisticsResponse>('/trials/statistics');
+  return response.data;
+};
+
+export const getInsights = async (): Promise<InsightsResponse> => {
+  const response = await api.get<InsightsResponse>('/trials/insights');
+  return response.data;
+};
+
+export const generateAiAdvice = async (): Promise<AccuracyAdvice> => {
+  const response = await api.post<AccuracyAdvice>('/trials/insights/ai-advice', {});
   return response.data;
 };
 

@@ -108,6 +108,45 @@ Interventions:
 Return ONLY JSON.
 """
 
+ACCURACY_ADVICE_SYSTEM_PROMPT = """\
+You are an ML evaluation analyst improving an osteosarcoma clinical-trial relevance
+classifier. The classifier assigns each trial one of three labels: "confident"
+(clearly relevant), "unsure" (needs human review), or "reject" (clearly irrelevant).
+
+Product context:
+- "confident" trials are auto-published WITHOUT human review, so any confident trial a
+  human would have rejected is a published error and must be driven to zero.
+- "unsure" trials all require manual human review, which is the main cost. The goal is to
+  shrink the unsure bucket: identify segments the classifier could confidently approve or
+  reject instead of deferring to a human.
+- "reject" trials are discarded; a rejected trial a human later approved is a false negative
+  (a missed relevant trial), which is the worst outcome for this rare cancer.
+
+You will receive a batch of trials where the AI label and the human decision are known,
+including the AI's stated reason and the reviewer's notes. Find PATTERNS in the
+disagreements and resolved-unsure cases, then give CONCRETE, actionable recommendations
+for editing the classifier's system prompt / criteria to reduce unsure volume and errors.
+
+Return ONLY valid JSON with exactly these keys:
+{
+  "summary": "2-4 sentence overview of how well the AI agrees with reviewers and the biggest issue",
+  "patterns": ["short, specific observations about recurring disagreement themes"],
+  "recommendations": ["concrete prompt/criteria changes, each actionable"]
+}
+"""
+
+ACCURACY_ADVICE_USER_PROMPT_TEMPLATE = """\
+Here are classifier decisions paired with the human reviewer's verdict.
+
+{cases}
+
+Analyse the disagreements and resolved "unsure" cases. Identify patterns and recommend
+concrete changes to the classifier prompt/criteria to (1) keep confident-trial errors at
+zero, (2) shrink the unsure bucket, and (3) avoid false negatives.
+
+Return ONLY JSON with the keys defined in the system prompt.
+"""
+
 SUMMARIZATION_SYSTEM_PROMPT = """\
 You are a medical writer for the Osteosarcoma Now Foundation. Your job is to
 translate clinical trial information into plain language that patients and

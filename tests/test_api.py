@@ -685,3 +685,130 @@ async def test_statistics_counts_and_ai_correlation(test_client, db_engine):
     assert by_label["unsure"] == {"label": "unsure", "approved": 1, "rejected": 0, "pending": 1}
     # AI auto-rejected trials (rejected_by NULL) are not part of the human matrix
     assert "reject" not in by_label
+
+
+# ── GET /trials/insights ──────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_insights_empty_db(test_client):
+    r = await test_client.get("/api/v1/trials/insights")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["confident_error_rate"] is None
+    assert body["unsure_approval_rate"] is None
+    assert body["false_negative_count"] == 0
+    assert body["confident_false_positives"] == []
+    assert body["unsure_resolved"] == []
+    assert body["unsure_patterns"] == []
+
+
+@pytest.mark.asyncio
+async def test_insights_rates_and_patterns(test_client, db_engine):
+    async with db_engine.begin() as conn:
+        # Confident: 2 approved, 1 human-rejected -> error rate 1/3
+        await conn.execute(ClinicalTrial.__table__.insert().values(
+            nct_id="NCT50000001", brief_title="C approved 1", status=TrialStatus.APPROVED,
+            ai_relevance_label="confident", approved_by="admin@local",
+        ))
+        await conn.execute(ClinicalTrial.__table__.insert().values(
+            nct_id="NCT50000002", brief_title="C approved 2", status=TrialStatus.APPROVED,
+            ai_relevance_label="confident", approved_by="admin@local",
+        ))
+        await conn.execute(IrrelevantTrial.__table__.insert().values(
+            nct_id="NCT50000003", brief_title="C rejected", ai_relevance_label="confident",
+            rejected_by="admin@local", reviewer_notes="Not actually relevant",
+        ))
+        # Unsure: 1 approved, 1 rejected (both PHASE1) -> approval rate 1/2, pattern bucket
+        await conn.execute(ClinicalTrial.__table__.insert().values(
+            nct_id="NCT50000004", brief_title="U approved", status=TrialStatus.APPROVED,
+            ai_relevance_label="unsure", phase="PHASE1", approved_by="admin@local",
+        ))
+        await conn.execute(IrrelevantTrial.__table__.insert().values(
+            nct_id="NCT50000005", brief_title="U rejected", ai_relevance_label="unsure",
+            phase="PHASE1", rejected_by="admin@local",
+        ))
+        await conn.execute(ClinicalTrial.__table__.insert().values(
+            nct_id="NCT50000006", brief_title="U pending", status=TrialStatus.PENDING_REVIEW,
+            ai_relevance_label="unsure",
+        ))
+
+    r = await test_client.get("/api/v1/trials/insights")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["confident_error_rate"] == pytest.approx(1 / 3)
+    assert body["unsure_approval_rate"] == pytest.approx(1 / 2)
+    assert body["unsure_pending"] == 1
+    assert len(body["confident_false_positives"]) == 1
+    assert body["confident_false_positives"][0]["reviewer_notes"] == "Not actually relevant"
+
+    phase_buckets = [
+        p for p in body["unsure_patterns"] if p["dimension"] == "phase" and p["value"] == "PHASE1"
+    ]
+    assert phase_buckets == [{"dimension": "phase", "value": "PHASE1", "approved": 1, "rejected": 1}]
+
+
+@pytest.mark.asyncio
+async def test_restore_preserves_ai_label_and_enables_fn_detection(test_client, db_engine):
+    async with db_engine.begin() as conn:
+        await conn.execute(IrrelevantTrial.__table__.insert().values(
+            nct_id="NCT50000010", brief_title="AI-rejected trial",
+            ai_relevance_label="reject", ai_relevance_reason="Looked irrelevant",
+            rejected_by=None,
+        ))
+
+    # Restore should carry the AI verdict back onto the clinical trial
+    r = await test_client.post("/api/v1/irrelevant-trials/NCT50000010/restore")
+    assert r.status_code == 200
+    assert r.json()["ai_relevance_label"] == "reject"
+
+    # Approving the restored AI-rejected trial makes it a false negative
+    r = await test_client.patch("/api/v1/trials/NCT50000010/approve", json={"username": "admin"})
+    assert r.status_code == 200
+
+    r = await test_client.get("/api/v1/trials/insights")
+    body = r.json()
+    assert body["false_negative_count"] == 1
+    assert body["false_negatives"][0]["nct_id"] == "NCT50000010"
+
+
+# ── POST /trials/insights/ai-advice ───────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_ai_advice_returns_not_enough_data_when_empty(test_client):
+    r = await test_client.post("/api/v1/trials/insights/ai-advice")
+    assert r.status_code == 200
+    body = r.json()
+    assert "Not enough" in body["summary"]
+    assert body["patterns"] == []
+
+
+@pytest.mark.asyncio
+async def test_ai_advice_uses_llm_when_data_present(test_client, db_engine, monkeypatch):
+    from app.services.ai.schemas import AccuracyAdvice
+
+    class _FakeAIClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def analyze_accuracy(self, system_prompt, user_prompt):
+            return AccuracyAdvice(
+                summary="Confident trials are reliable.",
+                patterns=["Soft-tissue sarcomas often slip through as unsure"],
+                recommendations=["Clarify bone-sarcoma eligibility in the prompt"],
+            )
+
+    monkeypatch.setattr("app.api.endpoints.AIClient", _FakeAIClient)
+
+    async with db_engine.begin() as conn:
+        await conn.execute(IrrelevantTrial.__table__.insert().values(
+            nct_id="NCT50000020", brief_title="Confident but rejected",
+            ai_relevance_label="confident", rejected_by="admin@local",
+            reviewer_notes="Wrong cancer type",
+        ))
+
+    r = await test_client.post("/api/v1/trials/insights/ai-advice")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["summary"] == "Confident trials are reliable."
+    assert body["patterns"] == ["Soft-tissue sarcomas often slip through as unsure"]
+    assert body["recommendations"] == ["Clarify bone-sarcoma eligibility in the prompt"]
