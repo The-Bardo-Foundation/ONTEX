@@ -5,6 +5,7 @@ import type {
   IrrelevantTrialDetail,
   MarkIrrelevantBody,
   RejectBody,
+  StatisticsResponse,
   TrialDetail,
   TrialListItem,
   TrialsListResponse,
@@ -69,6 +70,11 @@ export const getTrials = async (params: GetTrialsParams = {}): Promise<TrialsLis
 
 export const getTrialFacets = async (): Promise<TrialFacets> => {
   const response = await api.get<TrialFacets>('/trials/facets');
+  return response.data;
+};
+
+export const getStatistics = async (): Promise<StatisticsResponse> => {
+  const response = await api.get<StatisticsResponse>('/trials/statistics');
   return response.data;
 };
 

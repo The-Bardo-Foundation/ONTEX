@@ -375,6 +375,117 @@ async def get_trial_facets(db: AsyncSession = Depends(get_db)):
     return TrialFacets(countries=sorted(unique))
 
 
+class AiLabelBreakdown(BaseModel):
+    label: str
+    approved: int
+    rejected: int
+    pending: int
+
+
+class StatisticsResponse(BaseModel):
+    approved_by_admin: int
+    rejected_by_admin: int
+    pending_review: int
+    ai_auto_rejected: int
+    total: int
+    ai_confident_approval_rate: Optional[float]
+    by_ai_label: List[AiLabelBreakdown]
+
+
+_AI_LABEL_ORDER = ["confident", "unsure", "reject"]
+
+
+def _normalize_label(label: Optional[str]) -> str:
+    return label if label else "none"
+
+
+@router.get("/trials/statistics", response_model=StatisticsResponse)
+async def get_statistics(
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Aggregate approval/rejection counts and how well the AI relevance label
+    agrees with the human reviewer's decision.
+
+    Human-approved trials live in clinical_trials (status=APPROVED); human-rejected
+    trials are moved to irrelevant_trials with rejected_by set; AI auto-rejected
+    trials are in irrelevant_trials with rejected_by NULL.
+    """
+
+    async def _grouped_counts(stmt) -> dict[str, int]:
+        rows = (await db.execute(stmt)).all()
+        return {_normalize_label(row[0]): row[1] for row in rows}
+
+    approved_by_label = await _grouped_counts(
+        select(ClinicalTrial.ai_relevance_label, func.count())
+        .where(ClinicalTrial.status == TrialStatus.APPROVED)
+        .group_by(ClinicalTrial.ai_relevance_label)
+    )
+    pending_by_label = await _grouped_counts(
+        select(ClinicalTrial.ai_relevance_label, func.count())
+        .where(ClinicalTrial.status == TrialStatus.PENDING_REVIEW)
+        .group_by(ClinicalTrial.ai_relevance_label)
+    )
+    human_rejected_by_label = await _grouped_counts(
+        select(IrrelevantTrial.ai_relevance_label, func.count())
+        .where(IrrelevantTrial.rejected_by.isnot(None))
+        .group_by(IrrelevantTrial.ai_relevance_label)
+    )
+
+    legacy_rejected = (
+        await db.execute(
+            select(func.count())
+            .select_from(ClinicalTrial)
+            .where(ClinicalTrial.status == TrialStatus.REJECTED)
+        )
+    ).scalar() or 0
+    ai_auto_rejected = (
+        await db.execute(
+            select(func.count())
+            .select_from(IrrelevantTrial)
+            .where(IrrelevantTrial.rejected_by.is_(None))
+        )
+    ).scalar() or 0
+
+    approved_by_admin = sum(approved_by_label.values())
+    pending_review = sum(pending_by_label.values())
+    rejected_by_admin = sum(human_rejected_by_label.values()) + legacy_rejected
+    total = approved_by_admin + rejected_by_admin + pending_review + ai_auto_rejected
+
+    confident_approved = approved_by_label.get("confident", 0)
+    confident_rejected = human_rejected_by_label.get("confident", 0)
+    confident_decided = confident_approved + confident_rejected
+    ai_confident_approval_rate = (
+        confident_approved / confident_decided if confident_decided else None
+    )
+
+    seen_labels = (
+        set(approved_by_label) | set(pending_by_label) | set(human_rejected_by_label)
+    )
+    ordered_labels = _AI_LABEL_ORDER + sorted(seen_labels - set(_AI_LABEL_ORDER))
+    by_ai_label = [
+        AiLabelBreakdown(
+            label=label,
+            approved=approved_by_label.get(label, 0),
+            rejected=human_rejected_by_label.get(label, 0),
+            pending=pending_by_label.get(label, 0),
+        )
+        for label in ordered_labels
+        if label in seen_labels
+    ]
+
+    return StatisticsResponse(
+        approved_by_admin=approved_by_admin,
+        rejected_by_admin=rejected_by_admin,
+        pending_review=pending_review,
+        ai_auto_rejected=ai_auto_rejected,
+        total=total,
+        ai_confident_approval_rate=ai_confident_approval_rate,
+        by_ai_label=by_ai_label,
+    )
+
+
 @router.get("/trials/review-queue", response_model=List[TrialListItem])
 async def get_review_queue(
     _user: dict = Depends(clerk_user),

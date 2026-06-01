@@ -150,3 +150,20 @@ export interface IrrelevantTrialDetail {
 export interface MarkIrrelevantBody {
   irrelevance_reason?: string;
 }
+
+export interface AiLabelBreakdown {
+  label: string;
+  approved: number;
+  rejected: number;
+  pending: number;
+}
+
+export interface StatisticsResponse {
+  approved_by_admin: number;
+  rejected_by_admin: number;
+  pending_review: number;
+  ai_auto_rejected: number;
+  total: number;
+  ai_confident_approval_rate: number | null;
+  by_ai_label: AiLabelBreakdown[];
+}

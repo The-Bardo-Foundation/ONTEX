@@ -7,6 +7,7 @@ import { LandingPage } from './pages/LandingPage';
 import { AllTrialsPage } from './pages/AllTrialsPage';
 import { TrialDetailPage } from './pages/TrialDetailPage';
 import { ReviewQueuePage } from './pages/ReviewQueuePage';
+import { StatisticsPage } from './pages/StatisticsPage';
 import { setTokenProvider } from './api';
 
 function App() {
@@ -47,6 +48,14 @@ function App() {
         element={
           <ProtectedRoute>
             <Layout variant="admin"><AllTrialsPage adminMode /></Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/statistics"
+        element={
+          <ProtectedRoute>
+            <Layout variant="admin"><StatisticsPage /></Layout>
           </ProtectedRoute>
         }
       />

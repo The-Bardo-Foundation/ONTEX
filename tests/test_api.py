@@ -1,6 +1,6 @@
 import pytest
 
-from app.db.models import ClinicalTrial, IngestionEvent, TrialStatus
+from app.db.models import ClinicalTrial, IngestionEvent, IrrelevantTrial, TrialStatus
 
 
 # ──────────────────────────────────────────────────────────
@@ -603,3 +603,85 @@ async def test_ingestion_history_returns_empty_when_no_runs(test_client):
     body = r.json()
     assert body["recent_runs"] == []
     assert body["next_run"] is None  # no scheduler in test env
+
+
+# ── GET /trials/statistics ────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_statistics_empty_db_returns_zeros(test_client):
+    r = await test_client.get("/api/v1/trials/statistics")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["approved_by_admin"] == 0
+    assert body["rejected_by_admin"] == 0
+    assert body["pending_review"] == 0
+    assert body["ai_auto_rejected"] == 0
+    assert body["total"] == 0
+    assert body["ai_confident_approval_rate"] is None
+    assert body["by_ai_label"] == []
+
+
+@pytest.mark.asyncio
+async def test_statistics_counts_and_ai_correlation(test_client, db_engine):
+    async with db_engine.begin() as conn:
+        # Human-approved trials (AI deemed relevant)
+        await conn.execute(
+            ClinicalTrial.__table__.insert().values(
+                nct_id="NCT40000001", brief_title="Approved confident A",
+                status=TrialStatus.APPROVED, ai_relevance_label="confident",
+                approved_by="admin@local",
+            )
+        )
+        await conn.execute(
+            ClinicalTrial.__table__.insert().values(
+                nct_id="NCT40000002", brief_title="Approved confident B",
+                status=TrialStatus.APPROVED, ai_relevance_label="confident",
+                approved_by="admin@local",
+            )
+        )
+        await conn.execute(
+            ClinicalTrial.__table__.insert().values(
+                nct_id="NCT40000003", brief_title="Approved unsure",
+                status=TrialStatus.APPROVED, ai_relevance_label="unsure",
+                approved_by="admin@local",
+            )
+        )
+        # Pending trial
+        await conn.execute(
+            ClinicalTrial.__table__.insert().values(
+                nct_id="NCT40000004", brief_title="Pending unsure",
+                status=TrialStatus.PENDING_REVIEW, ai_relevance_label="unsure",
+            )
+        )
+        # Human-rejected trial (AI said confident, reviewer disagreed)
+        await conn.execute(
+            IrrelevantTrial.__table__.insert().values(
+                nct_id="NCT40000005", brief_title="Human-rejected confident",
+                ai_relevance_label="confident", rejected_by="admin@local",
+            )
+        )
+        # AI auto-rejected trial (rejected_by is NULL)
+        await conn.execute(
+            IrrelevantTrial.__table__.insert().values(
+                nct_id="NCT40000006", brief_title="AI-rejected",
+                ai_relevance_label="reject", rejected_by=None,
+            )
+        )
+
+    r = await test_client.get("/api/v1/trials/statistics")
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body["approved_by_admin"] == 3
+    assert body["rejected_by_admin"] == 1
+    assert body["pending_review"] == 1
+    assert body["ai_auto_rejected"] == 1
+    assert body["total"] == 6
+    # 2 confident approved, 1 confident human-rejected -> 2/3
+    assert body["ai_confident_approval_rate"] == pytest.approx(2 / 3)
+
+    by_label = {row["label"]: row for row in body["by_ai_label"]}
+    assert by_label["confident"] == {"label": "confident", "approved": 2, "rejected": 1, "pending": 0}
+    assert by_label["unsure"] == {"label": "unsure", "approved": 1, "rejected": 0, "pending": 1}
+    # AI auto-rejected trials (rejected_by NULL) are not part of the human matrix
+    assert "reject" not in by_label
