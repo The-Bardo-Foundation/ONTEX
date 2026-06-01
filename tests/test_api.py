@@ -812,3 +812,67 @@ async def test_ai_advice_uses_llm_when_data_present(test_client, db_engine, monk
     assert body["summary"] == "Confident trials are reliable."
     assert body["patterns"] == ["Soft-tissue sarcomas often slip through as unsure"]
     assert body["recommendations"] == ["Clarify bone-sarcoma eligibility in the prompt"]
+
+
+# ── GET /trials/insights/advice-history ───────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_advice_history_empty(test_client):
+    r = await test_client.get("/api/v1/trials/insights/advice-history")
+    assert r.status_code == 200
+    assert r.json() == {"runs": []}
+
+
+@pytest.mark.asyncio
+async def test_advice_generation_persists_run(test_client, db_engine, monkeypatch):
+    from app.services.ai.schemas import AccuracyAdvice
+
+    class _FakeAIClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def analyze_accuracy(self, system_prompt, user_prompt):
+            return AccuracyAdvice(
+                summary="Looks good.",
+                patterns=["pattern A"],
+                recommendations=["rec A", "rec B"],
+            )
+
+    monkeypatch.setattr("app.api.endpoints.AIClient", _FakeAIClient)
+
+    async with db_engine.begin() as conn:
+        await conn.execute(ClinicalTrial.__table__.insert().values(
+            nct_id="NCT60000001", brief_title="Confident approved", status=TrialStatus.APPROVED,
+            ai_relevance_label="confident", approved_by="admin@local",
+        ))
+        await conn.execute(IrrelevantTrial.__table__.insert().values(
+            nct_id="NCT60000002", brief_title="Confident rejected",
+            ai_relevance_label="confident", rejected_by="admin@local",
+            reviewer_notes="Wrong type",
+        ))
+
+    gen = await test_client.post("/api/v1/trials/insights/ai-advice")
+    assert gen.status_code == 200
+
+    r = await test_client.get("/api/v1/trials/insights/advice-history")
+    assert r.status_code == 200
+    runs = r.json()["runs"]
+    assert len(runs) == 1
+    run = runs[0]
+    assert run["summary"] == "Looks good."
+    assert run["patterns"] == ["pattern A"]
+    assert run["recommendations"] == ["rec A", "rec B"]
+    # metric snapshot captured: 1 confident approved, 1 confident rejected -> 0.5 error rate
+    assert run["confident_error_rate"] == pytest.approx(0.5)
+    assert run["examples_used"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_advice_without_data_does_not_persist(test_client):
+    # No trials -> short-circuits before the LLM call and should not log a run
+    gen = await test_client.post("/api/v1/trials/insights/ai-advice")
+    assert gen.status_code == 200
+    assert "Not enough" in gen.json()["summary"]
+
+    r = await test_client.get("/api/v1/trials/insights/advice-history")
+    assert r.json() == {"runs": []}

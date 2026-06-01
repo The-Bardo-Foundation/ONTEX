@@ -204,3 +204,25 @@ export interface AccuracyAdvice {
   patterns: string[];
   recommendations: string[];
 }
+
+export interface AdviceRun {
+  id: number;
+  created_at: string;
+  ai_model: string;
+  confident_approved: number;
+  confident_rejected: number;
+  confident_error_rate: number | null;
+  unsure_approved: number;
+  unsure_rejected: number;
+  unsure_pending: number;
+  unsure_approval_rate: number | null;
+  false_negative_count: number;
+  examples_used: number;
+  summary: string | null;
+  patterns: string[];
+  recommendations: string[];
+}
+
+export interface AdviceHistoryResponse {
+  runs: AdviceRun[];
+}

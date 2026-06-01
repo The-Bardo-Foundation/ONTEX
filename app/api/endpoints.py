@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import json
 import re
 from datetime import datetime
 from typing import Any, List, Optional
@@ -10,8 +11,16 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.db.database import get_db
-from app.db.models import ClinicalTrial, IngestionEvent, IngestionRun, IrrelevantTrial, TrialStatus
+from app.db.models import (
+    AccuracyAdviceRun,
+    ClinicalTrial,
+    IngestionEvent,
+    IngestionRun,
+    IrrelevantTrial,
+    TrialStatus,
+)
 from app.services import accuracy
 from app.services.ai.client import AIClient
 from app.services.ai.prompts import (
@@ -588,10 +597,102 @@ async def generate_ai_advice(
         )
 
     user_prompt = ACCURACY_ADVICE_USER_PROMPT_TEMPLATE.format(cases=cases)
-    return await client.analyze_accuracy(
+    advice = await client.analyze_accuracy(
         system_prompt=ACCURACY_ADVICE_SYSTEM_PROMPT,
         user_prompt=user_prompt,
     )
+
+    examples_used = (
+        len(insights.confident_false_positives)
+        + len(insights.false_negatives)
+        + len(insights.unsure_resolved)
+    )
+    db.add(
+        AccuracyAdviceRun(
+            ai_model=settings.AI_MODEL,
+            confident_approved=insights.confident_approved,
+            confident_rejected=insights.confident_rejected,
+            confident_error_rate=insights.confident_error_rate,
+            unsure_approved=insights.unsure_approved,
+            unsure_rejected=insights.unsure_rejected,
+            unsure_pending=insights.unsure_pending,
+            unsure_approval_rate=insights.unsure_approval_rate,
+            false_negative_count=insights.false_negative_count,
+            examples_used=examples_used,
+            summary=advice.summary,
+            patterns=json.dumps(advice.patterns),
+            recommendations=json.dumps(advice.recommendations),
+        )
+    )
+    await db.commit()
+    return advice
+
+
+class AdviceRunOut(BaseModel):
+    id: int
+    created_at: datetime
+    ai_model: str
+    confident_approved: int
+    confident_rejected: int
+    confident_error_rate: Optional[float]
+    unsure_approved: int
+    unsure_rejected: int
+    unsure_pending: int
+    unsure_approval_rate: Optional[float]
+    false_negative_count: int
+    examples_used: int
+    summary: Optional[str]
+    patterns: List[str]
+    recommendations: List[str]
+
+
+class AdviceHistoryResponse(BaseModel):
+    runs: List[AdviceRunOut]
+
+
+def _decode_json_list(raw: Optional[str]) -> List[str]:
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+        return value if isinstance(value, list) else []
+    except (ValueError, TypeError):
+        return []
+
+
+@router.get("/trials/insights/advice-history", response_model=AdviceHistoryResponse)
+async def get_advice_history(
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the last 20 saved AI accuracy-advice runs, newest first."""
+    stmt = (
+        select(AccuracyAdviceRun)
+        .order_by(AccuracyAdviceRun.created_at.desc(), AccuracyAdviceRun.id.desc())
+        .limit(20)
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    runs = [
+        AdviceRunOut(
+            id=row.id,
+            created_at=row.created_at,
+            ai_model=row.ai_model,
+            confident_approved=row.confident_approved,
+            confident_rejected=row.confident_rejected,
+            confident_error_rate=row.confident_error_rate,
+            unsure_approved=row.unsure_approved,
+            unsure_rejected=row.unsure_rejected,
+            unsure_pending=row.unsure_pending,
+            unsure_approval_rate=row.unsure_approval_rate,
+            false_negative_count=row.false_negative_count,
+            examples_used=row.examples_used,
+            summary=row.summary,
+            patterns=_decode_json_list(row.patterns),
+            recommendations=_decode_json_list(row.recommendations),
+        )
+        for row in rows
+    ]
+    return AdviceHistoryResponse(runs=runs)
 
 
 @router.get("/trials/review-queue", response_model=List[TrialListItem])

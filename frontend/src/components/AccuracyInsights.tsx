@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react';
-import { generateAiAdvice, getInsights } from '../api';
-import type { AccuracyAdvice, InsightsResponse, PatternBucket, TrialExample } from '../types';
+import { generateAiAdvice, getAdviceHistory, getInsights } from '../api';
+import type {
+  AccuracyAdvice,
+  AdviceRun,
+  InsightsResponse,
+  PatternBucket,
+  TrialExample,
+} from '../types';
 
 const DIMENSION_LABEL: Record<string, string> = {
   phase: 'Phase',
@@ -116,6 +122,36 @@ function AdvicePanel({ advice }: { advice: AccuracyAdvice }) {
   );
 }
 
+function AdviceHistory({ runs }: { runs: AdviceRun[] }) {
+  if (runs.length === 0) {
+    return (
+      <p className="mt-2 text-sm text-gray-500">
+        No saved runs yet. Each generation is stored so you can track whether prompt changes
+        move the rates over time.
+      </p>
+    );
+  }
+  return (
+    <ul className="mt-2 divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white shadow-sm">
+      {runs.map((run) => (
+        <li key={run.id} className="px-5 py-3">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500">
+            <span className="font-medium text-gray-700">
+              {new Date(run.created_at).toLocaleString()}
+            </span>
+            <span>confident error {pct(run.confident_error_rate)}</span>
+            <span>unsure approval {pct(run.unsure_approval_rate)}</span>
+            <span>false negatives {run.false_negative_count}</span>
+            <span>{run.examples_used} examples</span>
+            <span className="text-gray-400">{run.ai_model}</span>
+          </div>
+          {run.summary && <p className="mt-1 text-sm text-gray-700">{run.summary}</p>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function AccuracyInsights() {
   const [insights, setInsights] = useState<InsightsResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -124,6 +160,15 @@ export function AccuracyInsights() {
   const [advice, setAdvice] = useState<AccuracyAdvice | null>(null);
   const [adviceLoading, setAdviceLoading] = useState(false);
   const [adviceError, setAdviceError] = useState<string | null>(null);
+  const [history, setHistory] = useState<AdviceRun[]>([]);
+
+  const refreshHistory = () => {
+    getAdviceHistory()
+      .then((data) => setHistory(data.runs))
+      .catch(() => {
+        /* history is non-critical; ignore load errors */
+      });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -140,6 +185,7 @@ export function AccuracyInsights() {
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
+    refreshHistory();
     return () => {
       cancelled = true;
     };
@@ -151,6 +197,7 @@ export function AccuracyInsights() {
     try {
       const result = await generateAiAdvice();
       setAdvice(result);
+      refreshHistory();
     } catch {
       setAdviceError('Could not generate AI recommendations.');
     } finally {
@@ -258,6 +305,11 @@ export function AccuracyInsights() {
         </button>
         {adviceError && <span className="ml-3 text-sm text-red-600">{adviceError}</span>}
         {advice && <AdvicePanel advice={advice} />}
+      </div>
+
+      <div className="mt-6">
+        <h3 className="text-sm font-semibold text-gray-900">Advice history</h3>
+        <AdviceHistory runs={history} />
       </div>
     </div>
   );

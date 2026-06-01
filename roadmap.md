@@ -41,6 +41,7 @@ Phases 1–3 complete; Phase 4 in progress. The ingestion pipeline is fully oper
   - All Trials (`/admin/trials`) — all statuses visible, full status/event filters
   - Statistics (`/admin/statistics`) — approved/rejected/pending counts plus an AI-vs-human correlation matrix and the AI-`confident` approval rate (backed by `GET /api/v1/trials/statistics`; see `docs/statistics.md`)
   - Accuracy insights (under `/admin/statistics`) — confident-error-rate guardrail, unsure-bucket resolution stats and per-segment patterns, false-negative tracking (restore preserves the AI label), and on-demand LLM recommendations for improving the classifier prompt (backed by `GET /api/v1/trials/insights` and `POST /api/v1/trials/insights/ai-advice`; see `docs/insights.md`)
+  - Accuracy advice history — each AI-advice generation is logged to `accuracy_advice_runs` (migration 009) with a metric snapshot + advice, surfaced via `GET /api/v1/trials/insights/advice-history` so prompt changes can be correlated with rate drift over time
   - Ingestion progress modal — step-by-step progress bars via SSE, shows counts per step
 - `approved_by`/`rejected_by` pulled from Clerk `user.primaryEmailAddress` (was hardcoded to `"admin"`)
 - 53 tests passing (API, ingestion pipeline, AI services)

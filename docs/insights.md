@@ -11,6 +11,12 @@ POST /api/v1/trials/insights/ai-advice  (auth-protected, on-demand LLM call)
 
 The analysis logic lives in [app/services/accuracy.py](../app/services/accuracy.py).
 
+A third endpoint returns the saved history of advice generations:
+
+```
+GET /api/v1/trials/insights/advice-history  (auth-protected)
+```
+
 ## Product assumption
 
 `confident` trials are trusted enough to publish without human review. That makes two
@@ -48,6 +54,15 @@ The "Generate AI recommendations" button calls `POST /trials/insights/ai-advice`
 gathers the disagreement examples (confident false positives, false negatives, and resolved
 unsure trials — with the AI reason and the reviewer's notes) and asks the LLM to return
 `{ summary, patterns, recommendations }` aimed at keeping confident errors at zero,
-shrinking the unsure bucket, and avoiding false negatives. It is on-demand only (not
-persisted), is a no-op with a friendly message when there is no data, and fails safe when
-the AI key is missing or the call errors.
+shrinking the unsure bucket, and avoiding false negatives. It is a no-op with a friendly
+message when there is no data, and fails safe when the AI key is missing or the call errors.
+
+## Tracking accuracy over time
+
+Every successful generation is appended to the `accuracy_advice_runs` table
+(model `AccuracyAdviceRun`, migration `009`): a snapshot of the metrics at that moment
+(confident error rate, unsure approval rate, false-negative count, examples used, AI model)
+plus the advice payload. `GET /trials/insights/advice-history` returns the last 20 runs
+(newest first), rendered as a compact dated list under the AI-advice button. This lets you
+correlate edits to `CLASSIFICATION_SYSTEM_PROMPT` with whether the rates actually improved.
+Rows are small (~1-3 KB each), so the log stays negligible even over years of use.

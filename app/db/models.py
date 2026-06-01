@@ -2,7 +2,7 @@ import enum
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Enum, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Enum, Float, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.database import Base
@@ -152,4 +152,31 @@ class IngestionRun(Base):
     fetch_errors: Mapped[int] = mapped_column(Integer, default=0)
     classify_errors: Mapped[int] = mapped_column(Integer, default=0)
     skipped_unchanged: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class AccuracyAdviceRun(Base):
+    """One record per LLM accuracy-advice generation — tracks classifier metrics
+    and the advice over time so prompt changes can be correlated with drift."""
+
+    __tablename__ = "accuracy_advice_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    ai_model: Mapped[str] = mapped_column(String)
+
+    # Metric snapshot at generation time
+    confident_approved: Mapped[int] = mapped_column(Integer, default=0)
+    confident_rejected: Mapped[int] = mapped_column(Integer, default=0)
+    confident_error_rate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    unsure_approved: Mapped[int] = mapped_column(Integer, default=0)
+    unsure_rejected: Mapped[int] = mapped_column(Integer, default=0)
+    unsure_pending: Mapped[int] = mapped_column(Integer, default=0)
+    unsure_approval_rate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    false_negative_count: Mapped[int] = mapped_column(Integer, default=0)
+    examples_used: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Advice payload
+    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    patterns: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON-encoded list
+    recommendations: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON-encoded list
 

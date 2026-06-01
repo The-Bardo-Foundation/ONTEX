@@ -5,6 +5,7 @@ import type {
   IrrelevantTrialDetail,
   MarkIrrelevantBody,
   AccuracyAdvice,
+  AdviceHistoryResponse,
   InsightsResponse,
   RejectBody,
   StatisticsResponse,
@@ -87,6 +88,11 @@ export const getInsights = async (): Promise<InsightsResponse> => {
 
 export const generateAiAdvice = async (): Promise<AccuracyAdvice> => {
   const response = await api.post<AccuracyAdvice>('/trials/insights/ai-advice', {});
+  return response.data;
+};
+
+export const getAdviceHistory = async (): Promise<AdviceHistoryResponse> => {
+  const response = await api.get<AdviceHistoryResponse>('/trials/insights/advice-history');
   return response.data;
 };
 
