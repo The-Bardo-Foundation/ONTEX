@@ -2,7 +2,7 @@ import enum
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Enum, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.database import Base
@@ -122,6 +122,34 @@ class IrrelevantTrial(ClinicalTrialBase, Base):
     irrelevance_reason: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
 
+class SearchKeyword(Base):
+    """Admin-managed search terms that drive ingestion and admin visibility."""
+
+    __tablename__ = "search_keywords"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    term: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+class TrialKeywordMatch(Base):
+    """Maps trial NCT IDs to search keywords that matched them."""
+
+    __tablename__ = "trial_keyword_matches"
+
+    nct_id: Mapped[str] = mapped_column(String, primary_key=True)
+    keyword_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("search_keywords.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    matched_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
 class IngestionRun(Base):
     """One record per ingestion pipeline execution — queryable audit trail."""
 
@@ -139,4 +167,5 @@ class IngestionRun(Base):
     fetch_errors: Mapped[int] = mapped_column(Integer, default=0)
     classify_errors: Mapped[int] = mapped_column(Integer, default=0)
     skipped_unchanged: Mapped[int] = mapped_column(Integer, default=0)
+    pruned_trials: Mapped[int] = mapped_column(Integer, default=0)
 

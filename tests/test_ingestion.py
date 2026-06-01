@@ -25,7 +25,15 @@ from sqlalchemy.orm import sessionmaker
 from unittest.mock import AsyncMock, MagicMock
 
 from app.db.database import Base
-from app.db.models import ClinicalTrial, IngestionEvent, IngestionRun, IrrelevantTrial, TrialStatus
+from app.db.models import (
+    ClinicalTrial,
+    IngestionEvent,
+    IngestionRun,
+    IrrelevantTrial,
+    SearchKeyword,
+    TrialKeywordMatch,
+    TrialStatus,
+)
 from app.services.ai.schemas import ClassificationResult, ConfidenceLabel
 from app.services.ctgov.study_detail import map_api_to_model
 
@@ -954,5 +962,114 @@ async def test_approved_trial_update_saves_previous_official_snapshot(tmp_path, 
         assert snapshot["brief_summary"] == old_summary
         # Current brief_summary should be the new value
         assert trial.brief_summary == "Updated summary from ClinicalTrials.gov"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_ingestion_uses_active_keywords_from_db_when_no_override(tmp_path, monkeypatch):
+    """When search_terms is omitted, ingestion should use active DB keywords only."""
+    engine, factory = _make_test_db(tmp_path, "test_keywords_from_db.db")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with factory() as db:
+        db.add_all(
+            [
+                SearchKeyword(term="osteosarcoma", is_active=True),
+                SearchKeyword(term="inactive-term", is_active=False),
+            ]
+        )
+        await db.commit()
+
+    seen_terms: list[str] = []
+
+    def fake_iter(**kwargs):
+        seen_terms.append(kwargs["search_term"])
+        return [("NCT_KEYWORD_ACTIVE", "2024-06-01")] if kwargs["search_term"] == "osteosarcoma" else []
+
+    monkeypatch.setattr("app.services.ingestion.SessionLocal", factory)
+    monkeypatch.setattr("app.services.ingestion.iter_study_index_rows", fake_iter)
+    monkeypatch.setattr("app.services.ingestion.fetch_full_study", lambda nct_id: {"protocolSection": {}})
+    monkeypatch.setattr(
+        "app.services.ingestion.map_api_to_model",
+        lambda raw: make_trial_dict(nct_id="NCT_KEYWORD_ACTIVE"),
+    )
+    monkeypatch.setattr("app.services.ingestion.AIClient", lambda: _make_mock_ai_client())
+    monkeypatch.setattr(
+        "app.services.ingestion.ai_generate_summaries",
+        AsyncMock(return_value=FAKE_AI_SUMMARIES),
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.classify_trial",
+        AsyncMock(return_value=make_classification()),
+    )
+
+    from app.services.ingestion import run_daily_ingestion
+
+    await run_daily_ingestion()
+
+    assert seen_terms == ["osteosarcoma"]
+
+    async with factory() as db:
+        trial = await db.get(ClinicalTrial, "NCT_KEYWORD_ACTIVE")
+        assert trial is not None
+        match_rows = await db.execute(select(TrialKeywordMatch).where(TrialKeywordMatch.nct_id == "NCT_KEYWORD_ACTIVE"))
+        matches = match_rows.scalars().all()
+        assert len(matches) == 1
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_pruning_never_deletes_approved_trials(tmp_path, monkeypatch):
+    """Pruning removes out-of-scope non-approved rows but keeps APPROVED rows."""
+    engine, factory = _make_test_db(tmp_path, "test_pruning_approved_guard.db")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with factory() as db:
+        db.add(SearchKeyword(term="osteosarcoma", is_active=True))
+        db.add(
+            ClinicalTrial(
+                nct_id="NCT_KEEP_APPROVED",
+                brief_title="Keep me",
+                status=TrialStatus.APPROVED,
+            )
+        )
+        db.add(
+            ClinicalTrial(
+                nct_id="NCT_DELETE_PENDING",
+                brief_title="Delete me",
+                status=TrialStatus.PENDING_REVIEW,
+            )
+        )
+        db.add(
+            IrrelevantTrial(
+                nct_id="NCT_DELETE_IRRELEVANT",
+                brief_title="Delete irrelevant",
+            )
+        )
+        await db.commit()
+
+    monkeypatch.setattr("app.services.ingestion.SessionLocal", factory)
+    monkeypatch.setattr("app.services.ingestion.iter_study_index_rows", lambda **kwargs: [])
+
+    from app.services.ingestion import run_daily_ingestion
+
+    await run_daily_ingestion()
+
+    async with factory() as db:
+        approved = await db.get(ClinicalTrial, "NCT_KEEP_APPROVED")
+        pending = await db.get(ClinicalTrial, "NCT_DELETE_PENDING")
+        irrelevant = await db.get(IrrelevantTrial, "NCT_DELETE_IRRELEVANT")
+        assert approved is not None
+        assert pending is None
+        assert irrelevant is None
+
+        run = await db.execute(select(IngestionRun).order_by(IngestionRun.id.desc()))
+        latest = run.scalars().first()
+        assert latest is not None
+        assert latest.pruned_trials == 2
 
     await engine.dispose()

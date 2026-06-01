@@ -98,7 +98,6 @@ async def lifespan(app: FastAPI):
             run_daily_ingestion,
             "interval",
             hours=settings.INGESTION_SCHEDULE_HOURS,
-            kwargs={"search_terms": settings.SEARCH_TERMS},
         )
         print("startup: added ingestion job")
         scheduler.start()

@@ -130,3 +130,48 @@ export const editTrial = async (nct_id: string, body: CustomEdits): Promise<Tria
   const response = await api.patch<TrialDetail>(`/trials/${nct_id}/edit`, body);
   return response.data;
 };
+
+export interface SearchKeyword {
+  id: number;
+  term: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export const getKeywords = async (): Promise<SearchKeyword[]> => {
+  const response = await api.get<SearchKeyword[]>('/keywords');
+  return response.data;
+};
+
+export const createKeyword = async (term: string): Promise<SearchKeyword> => {
+  const response = await api.post<SearchKeyword>('/keywords', { term });
+  return response.data;
+};
+
+export const updateKeyword = async (keywordId: number, isActive: boolean): Promise<SearchKeyword> => {
+  const response = await api.patch<SearchKeyword>(`/keywords/${keywordId}`, { is_active: isActive });
+  return response.data;
+};
+
+export const deleteKeyword = async (
+  keywordId: number
+): Promise<{ deleted: boolean; pruned_trials: number }> => {
+  const response = await api.delete<{ deleted: boolean; pruned_trials: number }>(`/keywords/${keywordId}`);
+  return response.data;
+};
+
+export const pauseIngestion = async (): Promise<{ paused: boolean }> => {
+  const response = await api.post<{ paused: boolean }>('/ingestion/pause', {});
+  return response.data;
+};
+
+export const resumeIngestion = async (): Promise<{ paused: boolean }> => {
+  const response = await api.post<{ paused: boolean }>('/ingestion/resume', {});
+  return response.data;
+};
+
+export const stopIngestion = async (): Promise<{ stop_requested: boolean }> => {
+  const response = await api.post<{ stop_requested: boolean }>('/ingestion/stop', {});
+  return response.data;
+};

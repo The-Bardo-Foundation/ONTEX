@@ -47,7 +47,7 @@ flowchart TD
 
 **File:** [app/services/ctgov/study_index.py](../app/services/ctgov/study_index.py)
 
-Paginates the ClinicalTrials.gov v2 API using `SEARCH_TERMS` (default: `["osteosarcoma"]`). Collects `nct_id` and `last_update_posted_date` for every matching trial. Returns a dict `{nct_id: date}`.
+Paginates the ClinicalTrials.gov v2 API using active rows in `search_keywords` (admin-managed). Collects `nct_id` and `last_update_posted_date` for every matching trial. Returns a dict `{nct_id: date}`.
 
 - Endpoint: `GET https://clinicaltrials.gov/api/v2/studies`
 - Page size: `PAGE_SIZE` (default: 100)
@@ -136,11 +136,23 @@ Only runs for trials that passed classification as `confident` or `unsure`. Gene
 
 ---
 
-### Step 7 — Log ingestion run
+### Step 7 — Prune out-of-scope trials
+
+After each run, the pipeline prunes trials that no longer match any **active** keyword:
+
+- Deletes from `clinical_trials` when `status != APPROVED` and `nct_id` is outside active candidate universe
+- Deletes from `irrelevant_trials` when `nct_id` is outside active candidate universe
+- Never deletes `APPROVED` rows
+
+This keeps admin datasets aligned with current keyword policy while preserving approved content for public users.
+
+---
+
+### Step 8 — Log ingestion run
 
 **File:** [app/services/ingestion.py](../app/services/ingestion.py)
 
-Writes one row to `ingestion_runs` with counts for every outcome and error, plus the search terms used. Provides a full audit trail of every pipeline execution.
+Writes one row to `ingestion_runs` with counts for every outcome and error, plus the search terms used. Includes `pruned_trials` for deletions caused by keyword scope changes.
 
 ---
 
@@ -167,6 +179,8 @@ stateDiagram-v2
 |-------|---------|
 | `clinical_trials` | Relevant trials awaiting or past human review |
 | `irrelevant_trials` | Trials classified irrelevant; kept for deduplication |
+| `search_keywords` | Admin-managed keywords (active/inactive) |
+| `trial_keyword_matches` | nct_id ↔ keyword matches used for admin visibility and pruning |
 | `ingestion_runs` | Audit log — one row per pipeline execution |
 
 Schema: [app/db/models.py](../app/db/models.py)
@@ -189,7 +203,7 @@ Schema: [app/db/models.py](../app/db/models.py)
 
 | Env var | Default | Effect |
 |---------|---------|--------|
-| `SEARCH_TERMS` | `["osteosarcoma"]` | JSON list of CT.gov search terms |
+| `SEARCH_TERMS` | `["osteosarcoma"]` | Bootstrap fallback only (used to seed DB keywords) |
 | `INGESTION_SCHEDULE_HOURS` | `24` | How often the scheduler fires |
 | `AI_MODEL` | `openai/gpt-4o-mini` | OpenRouter model for summarisation and classification |
 | `CONFIDENCE_THRESHOLD` | `0.7` | Min confidence below which irrelevant → forced secondary |

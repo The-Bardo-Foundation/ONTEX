@@ -18,6 +18,7 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy import inspect
 
 revision: str = "002_add_ai_classification_columns"
 down_revision: Union[str, None] = "bab355f0ddc6"
@@ -26,12 +27,20 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # alembic_version.version_num was created as VARCHAR(32); our revision IDs exceed that
-    op.execute("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(256)")
-    op.add_column("clinical_trials", sa.Column("ai_relevance_confidence", sa.Float(), nullable=True))
-    op.add_column("clinical_trials", sa.Column("ai_relevance_reason", sa.Text(), nullable=True))
-    op.add_column("clinical_trials", sa.Column("ai_relevance_tier", sa.String(), nullable=True))
-    op.add_column("clinical_trials", sa.Column("ai_matching_criteria", sa.Text(), nullable=True))
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    existing_cols = {c["name"] for c in inspector.get_columns("clinical_trials")}
+    if conn.dialect.name != "sqlite":
+        # alembic_version.version_num was created as VARCHAR(32); our revision IDs exceed that
+        op.execute("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(256)")
+    if "ai_relevance_confidence" not in existing_cols:
+        op.add_column("clinical_trials", sa.Column("ai_relevance_confidence", sa.Float(), nullable=True))
+    if "ai_relevance_reason" not in existing_cols:
+        op.add_column("clinical_trials", sa.Column("ai_relevance_reason", sa.Text(), nullable=True))
+    if "ai_relevance_tier" not in existing_cols:
+        op.add_column("clinical_trials", sa.Column("ai_relevance_tier", sa.String(), nullable=True))
+    if "ai_matching_criteria" not in existing_cols:
+        op.add_column("clinical_trials", sa.Column("ai_matching_criteria", sa.Text(), nullable=True))
 
 
 def downgrade() -> None:

@@ -23,17 +23,31 @@ def upgrade() -> None:
     conn = op.get_bind()
     inspector = inspect(conn)
     tables = inspector.get_table_names()
+    dialect = conn.dialect.name
 
-    # Create TrialStatus enum safely
-    op.execute(
-        "DO $$ BEGIN IF NOT EXISTS "
-        "(SELECT 1 FROM pg_type WHERE typname = 'trialstatus') "
-        "THEN CREATE TYPE trialstatus AS ENUM "
-        "('PENDING_REVIEW', 'APPROVED', 'REJECTED'); "
-        "END IF; END $$;"
-    )
+    if dialect == "postgresql":
+        # Create TrialStatus enum safely
+        op.execute(
+            "DO $$ BEGIN IF NOT EXISTS "
+            "(SELECT 1 FROM pg_type WHERE typname = 'trialstatus') "
+            "THEN CREATE TYPE trialstatus AS ENUM "
+            "('PENDING_REVIEW', 'APPROVED', 'REJECTED'); "
+            "END IF; END $$;"
+        )
 
     if "clinical_trials" not in tables:
+        if dialect == "postgresql":
+            status_col_type = postgresql.ENUM(
+                "PENDING_REVIEW",
+                "APPROVED",
+                "REJECTED",
+                name="trialstatus",
+                create_type=False,
+            )
+        else:
+            # SQLite (and other non-Postgres backends) store enum values as strings.
+            status_col_type = sa.String()
+
         # Create clinical_trials table
         op.create_table(
             "clinical_trials",
@@ -44,13 +58,7 @@ def upgrade() -> None:
             sa.Column("custom_summary", sa.Text(), nullable=True),
             sa.Column(
                 "status",
-                postgresql.ENUM(
-                    "PENDING_REVIEW",
-                    "APPROVED",
-                    "REJECTED",
-                    name="trialstatus",
-                    create_type=False,
-                ),
+                status_col_type,
                 nullable=False,
                 server_default="PENDING_REVIEW",
             ),
@@ -75,4 +83,6 @@ def downgrade() -> None:
     op.drop_constraint("uq_clinical_trials_nct_id", "clinical_trials", type_="unique")
     op.drop_table("clinical_trials")
 
-    op.execute("DROP TYPE IF EXISTS trialstatus")
+    conn = op.get_bind()
+    if conn.dialect.name == "postgresql":
+        op.execute("DROP TYPE IF EXISTS trialstatus")

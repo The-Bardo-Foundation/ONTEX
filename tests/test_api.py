@@ -1,6 +1,13 @@
 import pytest
 
-from app.db.models import ClinicalTrial, IngestionEvent, TrialStatus
+from app.db.models import (
+    ClinicalTrial,
+    IngestionEvent,
+    IrrelevantTrial,
+    SearchKeyword,
+    TrialKeywordMatch,
+    TrialStatus,
+)
 
 
 # ──────────────────────────────────────────────────────────
@@ -559,6 +566,8 @@ async def test_ingestion_status_returns_state(test_client):
     import copy
     endpoints._ingestion_status.update({
         "running": False,
+        "paused": False,
+        "stop_requested": False,
         "steps": copy.deepcopy(endpoints._STEP_TEMPLATE),
         "error": None,
         "summary": None,
@@ -570,6 +579,8 @@ async def test_ingestion_status_returns_state(test_client):
     assert r.status_code == 200
     body = r.json()
     assert body["running"] is False
+    assert body["paused"] is False
+    assert body["stop_requested"] is False
     assert body["error"] is None
     assert body["summary"] is None
     assert len(body["steps"]) == 4
@@ -581,6 +592,65 @@ async def test_ingestion_status_rejects_unauthenticated(test_client, monkeypatch
     monkeypatch.delenv("SKIP_AUTH_FOR_TESTS", raising=False)
     r = await test_client.get("/api/v1/ingestion/status")
     assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_ingestion_pause_resume_stop_require_running(test_client):
+    pause = await test_client.post(
+        "/api/v1/ingestion/pause",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert pause.status_code == 409
+
+    resume = await test_client.post(
+        "/api/v1/ingestion/resume",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert resume.status_code == 409
+
+    stop = await test_client.post(
+        "/api/v1/ingestion/stop",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert stop.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_ingestion_pause_resume_stop_when_running(test_client):
+    import app.api.endpoints as endpoints
+
+    endpoints._ingestion_status["running"] = True
+    endpoints._ingestion_status["paused"] = False
+    endpoints._ingestion_status["stop_requested"] = False
+    endpoints._ingestion_pause_event.set()
+    endpoints._ingestion_stop_requested = False
+
+    pause = await test_client.post(
+        "/api/v1/ingestion/pause",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert pause.status_code == 200
+    assert pause.json() == {"paused": True}
+    assert endpoints._ingestion_status["paused"] is True
+    assert not endpoints._ingestion_pause_event.is_set()
+
+    resume = await test_client.post(
+        "/api/v1/ingestion/resume",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert resume.status_code == 200
+    assert resume.json() == {"paused": False}
+    assert endpoints._ingestion_status["paused"] is False
+    assert endpoints._ingestion_pause_event.is_set()
+
+    stop = await test_client.post(
+        "/api/v1/ingestion/stop",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert stop.status_code == 200
+    assert stop.json() == {"stop_requested": True}
+    assert endpoints._ingestion_status["stop_requested"] is True
+    assert endpoints._ingestion_stop_requested is True
 
 
 # ── GET /ingestion/history ────────────────────────────────────────────────────
@@ -602,3 +672,174 @@ async def test_ingestion_history_returns_empty_when_no_runs(test_client):
     body = r.json()
     assert body["recent_runs"] == []
     assert body["next_run"] is None  # no scheduler in test env
+
+
+# ── Keyword management ──────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_keyword_crud_flow(test_client):
+    create = await test_client.post("/api/v1/keywords", json={"term": " Osteosarcoma "})
+    assert create.status_code == 200
+    created = create.json()
+    assert created["term"] == "osteosarcoma"
+    assert created["is_active"] is True
+
+    dup = await test_client.post("/api/v1/keywords", json={"term": "osteosarcoma"})
+    assert dup.status_code == 409
+
+    kw_id = created["id"]
+    toggle = await test_client.patch(f"/api/v1/keywords/{kw_id}", json={"is_active": False})
+    assert toggle.status_code == 200
+    assert toggle.json()["is_active"] is False
+
+    listing = await test_client.get("/api/v1/keywords")
+    assert listing.status_code == 200
+    assert len(listing.json()) == 1
+    assert listing.json()[0]["term"] == "osteosarcoma"
+
+    deleted = await test_client.delete(f"/api/v1/keywords/{kw_id}")
+    assert deleted.status_code == 200
+    assert deleted.json()["deleted"] is True
+
+
+@pytest.mark.asyncio
+async def test_keywords_list_seeds_default_when_empty(test_client):
+    listing = await test_client.get("/api/v1/keywords")
+    assert listing.status_code == 200
+    body = listing.json()
+    assert len(body) >= 1
+    assert any(item["term"] == "osteosarcoma" for item in body)
+
+
+@pytest.mark.asyncio
+async def test_delete_keyword_prunes_non_approved_but_keeps_approved(test_client, db_engine):
+    async with db_engine.begin() as conn:
+        await conn.execute(
+            SearchKeyword.__table__.insert().values(id=1, term="osteosarcoma", is_active=True)
+        )
+        await conn.execute(
+            ClinicalTrial.__table__.insert().values(
+                nct_id="NCT_KEEP_APPROVED", brief_title="Keep", status=TrialStatus.APPROVED
+            )
+        )
+        await conn.execute(
+            ClinicalTrial.__table__.insert().values(
+                nct_id="NCT_DROP_PENDING", brief_title="Drop", status=TrialStatus.PENDING_REVIEW
+            )
+        )
+        await conn.execute(
+            IrrelevantTrial.__table__.insert().values(
+                nct_id="NCT_DROP_IRRELEVANT", brief_title="Drop irrelevant"
+            )
+        )
+        await conn.execute(
+            TrialKeywordMatch.__table__.insert().values(
+                nct_id="NCT_KEEP_APPROVED", keyword_id=1
+            )
+        )
+        await conn.execute(
+            TrialKeywordMatch.__table__.insert().values(
+                nct_id="NCT_DROP_PENDING", keyword_id=1
+            )
+        )
+        await conn.execute(
+            TrialKeywordMatch.__table__.insert().values(
+                nct_id="NCT_DROP_IRRELEVANT", keyword_id=1
+            )
+        )
+
+    deleted = await test_client.delete("/api/v1/keywords/1")
+    assert deleted.status_code == 200
+    assert deleted.json()["deleted"] is True
+    assert deleted.json()["pruned_trials"] == 2
+
+    approved_check = await test_client.get("/api/v1/trials?status=APPROVED")
+    assert approved_check.status_code == 200
+    approved_ids = {item["nct_id"] for item in approved_check.json()["items"]}
+    assert "NCT_KEEP_APPROVED" in approved_ids
+
+    pending_admin = await test_client.get(
+        "/api/v1/trials?status=PENDING_REVIEW",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert pending_admin.status_code == 200
+    assert pending_admin.json()["total"] == 0
+
+    irrelevant_admin = await test_client.get("/api/v1/irrelevant-trials")
+    assert irrelevant_admin.status_code == 200
+    assert irrelevant_admin.json()["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_admin_visibility_hides_trials_only_on_inactive_keywords(test_client, db_engine):
+    async with db_engine.begin() as conn:
+        await conn.execute(
+            SearchKeyword.__table__.insert().values(id=10, term="active-term", is_active=True)
+        )
+        await conn.execute(
+            SearchKeyword.__table__.insert().values(id=11, term="inactive-term", is_active=False)
+        )
+        await conn.execute(
+            ClinicalTrial.__table__.insert().values(
+                nct_id="NCT_PENDING_ACTIVE", brief_title="Pending active", status=TrialStatus.PENDING_REVIEW
+            )
+        )
+        await conn.execute(
+            ClinicalTrial.__table__.insert().values(
+                nct_id="NCT_PENDING_INACTIVE", brief_title="Pending inactive", status=TrialStatus.PENDING_REVIEW
+            )
+        )
+        await conn.execute(
+            ClinicalTrial.__table__.insert().values(
+                nct_id="NCT_APPROVED_INACTIVE", brief_title="Approved inactive", status=TrialStatus.APPROVED
+            )
+        )
+        await conn.execute(
+            IrrelevantTrial.__table__.insert().values(
+                nct_id="NCT_IRRELEVANT_ACTIVE", brief_title="Irrelevant active"
+            )
+        )
+        await conn.execute(
+            IrrelevantTrial.__table__.insert().values(
+                nct_id="NCT_IRRELEVANT_INACTIVE", brief_title="Irrelevant inactive"
+            )
+        )
+        await conn.execute(
+            TrialKeywordMatch.__table__.insert().values(nct_id="NCT_PENDING_ACTIVE", keyword_id=10)
+        )
+        await conn.execute(
+            TrialKeywordMatch.__table__.insert().values(nct_id="NCT_PENDING_INACTIVE", keyword_id=11)
+        )
+        await conn.execute(
+            TrialKeywordMatch.__table__.insert().values(nct_id="NCT_APPROVED_INACTIVE", keyword_id=11)
+        )
+        await conn.execute(
+            TrialKeywordMatch.__table__.insert().values(nct_id="NCT_IRRELEVANT_ACTIVE", keyword_id=10)
+        )
+        await conn.execute(
+            TrialKeywordMatch.__table__.insert().values(nct_id="NCT_IRRELEVANT_INACTIVE", keyword_id=11)
+        )
+
+    review_queue = await test_client.get("/api/v1/trials/review-queue")
+    assert review_queue.status_code == 200
+    assert [item["nct_id"] for item in review_queue.json()] == ["NCT_PENDING_ACTIVE"]
+
+    pending_admin = await test_client.get(
+        "/api/v1/trials?status=PENDING_REVIEW",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    pending_ids = {item["nct_id"] for item in pending_admin.json()["items"]}
+    assert pending_ids == {"NCT_PENDING_ACTIVE"}
+
+    approved_admin = await test_client.get(
+        "/api/v1/trials?status=APPROVED",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    approved_ids = {item["nct_id"] for item in approved_admin.json()["items"]}
+    assert "NCT_APPROVED_INACTIVE" in approved_ids
+
+    irrelevant_admin = await test_client.get("/api/v1/irrelevant-trials")
+    assert irrelevant_admin.status_code == 200
+    irrelevant_ids = {item["nct_id"] for item in irrelevant_admin.json()["items"]}
+    assert irrelevant_ids == {"NCT_IRRELEVANT_ACTIVE"}

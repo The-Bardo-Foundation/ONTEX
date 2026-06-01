@@ -34,13 +34,21 @@ import asyncio
 import json
 import logging
 from datetime import datetime
-from typing import Any, Callable, Coroutine, List, Optional
+from typing import Any, Awaitable, Callable, Coroutine, List, Optional
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 
 from app.core.config import settings
 from app.db.database import SessionLocal
-from app.db.models import ClinicalTrial, IngestionEvent, IngestionRun, IrrelevantTrial, TrialStatus
+from app.db.models import (
+    ClinicalTrial,
+    IngestionEvent,
+    IngestionRun,
+    IrrelevantTrial,
+    SearchKeyword,
+    TrialKeywordMatch,
+    TrialStatus,
+)
 from app.services.ai.classifier import classify_trial
 from app.services.ai.client import AIClient
 from app.services.ai.schemas import ClassificationResult, ConfidenceLabel
@@ -54,16 +62,105 @@ logger = logging.getLogger(__name__)
 ProgressCallback = Optional[Callable[[dict[str, Any]], Coroutine[Any, Any, None]]]
 
 
+async def _load_active_search_terms() -> list[str]:
+    async with SessionLocal() as db:
+        result = await db.execute(
+            select(SearchKeyword.term)
+            .where(SearchKeyword.is_active.is_(True))
+            .order_by(SearchKeyword.term.asc())
+        )
+        terms = [row.term for row in result]
+        if terms:
+            return terms
+        return [term.strip().lower() for term in settings.SEARCH_TERMS if term.strip()]
+
+
+async def _sync_trial_keyword_matches(
+    term_to_nct_ids: dict[str, set[str]],
+) -> None:
+    normalized_terms = [term.strip().lower() for term in term_to_nct_ids.keys() if term.strip()]
+    if not normalized_terms:
+        return
+
+    async with SessionLocal() as db:
+        result = await db.execute(
+            select(SearchKeyword.id, SearchKeyword.term)
+            .where(SearchKeyword.term.in_(normalized_terms))
+        )
+        term_to_keyword_id = {row.term: row.id for row in result}
+        keyword_ids = list(term_to_keyword_id.values())
+        if not keyword_ids:
+            return
+
+        # Refresh mappings only for currently-active terms in this run.
+        await db.execute(delete(TrialKeywordMatch).where(TrialKeywordMatch.keyword_id.in_(keyword_ids)))
+
+        for term, keyword_id in term_to_keyword_id.items():
+            for nct_id in term_to_nct_ids.get(term, set()):
+                db.add(TrialKeywordMatch(nct_id=nct_id, keyword_id=keyword_id))
+        await db.commit()
+
+
+async def _prune_out_of_scope_trials(active_nct_ids: set[str]) -> int:
+    async with SessionLocal() as db:
+        if active_nct_ids:
+            ct_result = await db.execute(
+                select(ClinicalTrial.nct_id).where(
+                    ClinicalTrial.status != TrialStatus.APPROVED,
+                    ClinicalTrial.nct_id.notin_(active_nct_ids),
+                )
+            )
+            ir_result = await db.execute(
+                select(IrrelevantTrial.nct_id).where(
+                    IrrelevantTrial.nct_id.notin_(active_nct_ids)
+                )
+            )
+        else:
+            ct_result = await db.execute(
+                select(ClinicalTrial.nct_id).where(ClinicalTrial.status != TrialStatus.APPROVED)
+            )
+            ir_result = await db.execute(select(IrrelevantTrial.nct_id))
+
+        stale_clinical_ids = [row.nct_id for row in ct_result]
+        stale_irrelevant_ids = [row.nct_id for row in ir_result]
+
+        if stale_clinical_ids:
+            await db.execute(delete(ClinicalTrial).where(ClinicalTrial.nct_id.in_(stale_clinical_ids)))
+        if stale_irrelevant_ids:
+            await db.execute(delete(IrrelevantTrial).where(IrrelevantTrial.nct_id.in_(stale_irrelevant_ids)))
+
+        stale_ids = stale_clinical_ids + stale_irrelevant_ids
+        if stale_ids:
+            await db.execute(delete(TrialKeywordMatch).where(TrialKeywordMatch.nct_id.in_(stale_ids)))
+
+        await db.commit()
+        return len(stale_ids)
+
+
 async def run_daily_ingestion(
     search_terms: List[str] | None = None,
     progress_callback: ProgressCallback = None,
+    should_stop: Optional[Callable[[], bool]] = None,
+    wait_if_paused: Optional[Callable[[], Awaitable[None]]] = None,
 ):
     if search_terms is None:
-        search_terms = settings.SEARCH_TERMS
+        search_terms = await _load_active_search_terms()
+
+    search_terms = [
+        term.strip().lower()
+        for term in (search_terms or [])
+        if term and term.strip()
+    ]
 
     async def emit(event: dict[str, Any]) -> None:
         if progress_callback:
             await progress_callback(event)
+
+    async def check_controls() -> None:
+        if wait_if_paused:
+            await wait_if_paused()
+        if should_stop and should_stop():
+            raise asyncio.CancelledError("Ingestion stop requested")
 
     # ──────────────────────────────────────────────────────────
     # STEP 1 — Collect NCT IDs + last-update dates for each term
@@ -73,7 +170,10 @@ async def run_daily_ingestion(
 
     await emit({"step": "searching", "label": "Searching ClinicalTrials.gov"})
 
+    term_to_nct_ids: dict[str, set[str]] = {term: set() for term in search_terms}
+
     for term in search_terms:
+        await check_controls()
         # iter_study_index_rows is a blocking generator; run it in a thread
         # pool so it does not block the async event loop.
         rows = await asyncio.to_thread(
@@ -85,6 +185,9 @@ async def run_daily_ingestion(
             # Later search terms overwrite earlier ones for the same NCT ID;
             # the date is the same regardless of which term matched.
             all_candidates[nct_id] = last_update
+            term_to_nct_ids[term].add(nct_id)
+
+    await _sync_trial_keyword_matches(term_to_nct_ids)
 
     # ──────────────────────────────────────────────────────────
     # STEP 2 — Classify each NCT ID against our database
@@ -117,8 +220,10 @@ async def run_daily_ingestion(
         "label": "Candidates found",
         "count": len(all_candidates),
     })
+    active_universe = set(all_candidates.keys())
 
     for nct_id, api_date in all_candidates.items():
+        await check_controls()
         if nct_id in existing_map:
             db_date = existing_map[nct_id] or ""
             if db_date != api_date:
@@ -161,6 +266,7 @@ async def run_daily_ingestion(
     })
 
     for fetch_idx, nct_id in enumerate(trials_to_process):
+        await check_controls()
         raw = await asyncio.to_thread(fetch_full_study, nct_id)
         if raw is None:
             logger.warning("Skipping %s — fetch_full_study returned None", nct_id)
@@ -180,6 +286,7 @@ async def run_daily_ingestion(
         })
 
     if not fetched:
+        pruned_trials = await _prune_out_of_scope_trials(active_universe)
         async with SessionLocal() as db:
             db.add(IngestionRun(
                 run_at=datetime.utcnow(),
@@ -189,6 +296,7 @@ async def run_daily_ingestion(
                 updated_trials=len(updated_trials),
                 reeval_trials=len(reeval_list),
                 fetch_errors=fetch_errors,
+                pruned_trials=pruned_trials,
             ))
             await db.commit()
         await emit({
@@ -200,12 +308,13 @@ async def run_daily_ingestion(
             "irrelevant": 0,
             "fetch_errors": fetch_errors,
             "classify_errors": 0,
+            "pruned_trials": pruned_trials,
         })
         logger.info(
             "Ingestion complete: no trials to process "
-            "(search_terms=%s, candidates=%d, new=%d, updated=%d, reeval=%d, fetch_errors=%d)",
+            "(search_terms=%s, candidates=%d, new=%d, updated=%d, reeval=%d, fetch_errors=%d, pruned=%d)",
             search_terms, len(all_candidates), len(new_trials),
-            len(updated_trials), len(reeval_list), fetch_errors,
+            len(updated_trials), len(reeval_list), fetch_errors, pruned_trials,
         )
         return
 
@@ -337,6 +446,7 @@ async def run_daily_ingestion(
     })
 
     for classify_idx, trial_data in enumerate(fetched):
+        await check_controls()
         nct_id = trial_data.get("nct_id")
         try:
             classification = await classify_trial(ai_client, trial_data)
@@ -381,6 +491,7 @@ async def run_daily_ingestion(
     })
 
     for summarize_idx, trial_data in enumerate(to_summarize):
+        await check_controls()
         custom_fields = await ai_generate_summaries(ai_client, trial_data)
         # Apply AI-generated fields, but preserve any non-null admin-edited values.
         protected = existing_custom_map.get(trial_data.get("nct_id"), {})
@@ -405,6 +516,7 @@ async def run_daily_ingestion(
 
     async with SessionLocal() as db:
         for trial_data in to_summarize:
+            await check_controls()
             nct_id = trial_data.get("nct_id")
             classification = classifications[nct_id]
             approval_history = existing_approval_map.get(nct_id, {})
@@ -430,6 +542,7 @@ async def run_daily_ingestion(
             processed += 1
 
         for trial_data in to_reject:
+            await check_controls()
             nct_id = trial_data.get("nct_id")
             classification = classifications[nct_id]
             irrelevant = IrrelevantTrial(
@@ -444,6 +557,12 @@ async def run_daily_ingestion(
             newly_irrelevant += 1
 
         await db.commit()
+
+    # ──────────────────────────────────────────────────────────
+    # STEP 7.5 — Prune trials outside active keyword scope
+    # Never remove APPROVED rows from clinical_trials.
+    # ──────────────────────────────────────────────────────────
+    pruned_trials = await _prune_out_of_scope_trials(active_universe)
 
     # ──────────────────────────────────────────────────────────
     # STEP 8 — Write ingestion run record + log summary
@@ -461,6 +580,7 @@ async def run_daily_ingestion(
             fetch_errors=fetch_errors,
             classify_errors=classify_errors,
             skipped_unchanged=len(content_unchanged),
+            pruned_trials=pruned_trials,
         ))
         await db.commit()
 
@@ -474,11 +594,12 @@ async def run_daily_ingestion(
         "irrelevant": newly_irrelevant,
         "fetch_errors": fetch_errors,
         "classify_errors": classify_errors,
+        "pruned_trials": pruned_trials,
     })
 
     logger.info(
         "Ingestion complete: %d new, %d updated, %d skipped (unchanged), %d re-evaluated | "
-        "%d relevant (PENDING_REVIEW), %d irrelevant | "
+        "%d relevant (PENDING_REVIEW), %d irrelevant, %d pruned | "
         "%d fetch errors, %d classify errors | "
         "search_terms=%s, total_candidates=%d",
         len(new_trials),
@@ -487,6 +608,7 @@ async def run_daily_ingestion(
         len(reeval_list),
         processed,
         newly_irrelevant,
+        pruned_trials,
         fetch_errors,
         classify_errors,
         search_terms,

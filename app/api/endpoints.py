@@ -2,16 +2,25 @@ import asyncio
 import copy
 import re
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import Any, Awaitable, Callable, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from app.api.middleware import clerk_user, optional_clerk_user
-from pydantic import BaseModel, ConfigDict
-from sqlalchemy import func, or_, select
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.db.database import get_db
-from app.db.models import ClinicalTrial, IngestionEvent, IngestionRun, IrrelevantTrial, TrialStatus
+from app.db.models import (
+    ClinicalTrial,
+    IngestionEvent,
+    IngestionRun,
+    IrrelevantTrial,
+    SearchKeyword,
+    TrialKeywordMatch,
+    TrialStatus,
+)
 
 router = APIRouter()
 
@@ -22,6 +31,9 @@ router = APIRouter()
 # closes, making them useless for a detached background task).
 
 _ingestion_lock = asyncio.Lock()
+_ingestion_pause_event = asyncio.Event()
+_ingestion_pause_event.set()
+_ingestion_stop_requested = False
 
 _STEP_TEMPLATE: list[dict[str, Any]] = [
     {"id": "searching",        "label": "Searching ClinicalTrials.gov", "state": "waiting", "count": None, "total": None, "note": None},
@@ -32,6 +44,8 @@ _STEP_TEMPLATE: list[dict[str, Any]] = [
 
 _ingestion_status: dict[str, Any] = {
     "running": False,
+    "paused": False,
+    "stop_requested": False,
     "steps": copy.deepcopy(_STEP_TEMPLATE),
     "error": None,
     "summary": None,
@@ -64,9 +78,24 @@ async def _ingestion_progress_callback(event: dict) -> None:
                 s["state"] = "done"
         _ingestion_status["summary"] = event
         _ingestion_status["running"] = False
+        _ingestion_status["paused"] = False
+        _ingestion_status["stop_requested"] = False
     elif step_id == "error":
         _ingestion_status["error"] = event.get("message", "Unknown error")
         _ingestion_status["running"] = False
+        _ingestion_status["paused"] = False
+        _ingestion_status["stop_requested"] = False
+
+
+def _ingestion_should_stop() -> bool:
+    return _ingestion_stop_requested
+
+
+async def _ingestion_wait_if_paused() -> None:
+    while not _ingestion_pause_event.is_set():
+        _ingestion_status["paused"] = True
+        await asyncio.sleep(0.25)
+    _ingestion_status["paused"] = False
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Pydantic models
@@ -335,6 +364,198 @@ class TrialFacets(BaseModel):
     countries: List[str]
 
 
+class SearchKeywordCreateBody(BaseModel):
+    term: str = Field(min_length=1, max_length=200)
+
+
+class SearchKeywordUpdateBody(BaseModel):
+    is_active: bool
+
+
+class SearchKeywordOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    term: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+def _normalize_keyword_term(term: str) -> str:
+    normalized = (term or "").strip().lower()
+    if not normalized:
+        raise HTTPException(status_code=422, detail="Keyword term cannot be empty")
+    return normalized
+
+
+def _default_keyword_terms() -> list[str]:
+    configured = settings.SEARCH_TERMS or ["osteosarcoma"]
+    seen: set[str] = set()
+    result: list[str] = []
+    for term in configured:
+        normalized = (term or "").strip().lower()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            result.append(normalized)
+    return result or ["osteosarcoma"]
+
+
+async def _ensure_default_keywords(db: AsyncSession) -> None:
+    count = await db.scalar(select(func.count()).select_from(SearchKeyword))
+    if (count or 0) > 0:
+        return
+    for term in _default_keyword_terms():
+        db.add(SearchKeyword(term=term, is_active=True))
+    await db.commit()
+
+
+def _active_keyword_match_exists_for_clinical() -> Any:
+    return (
+        select(TrialKeywordMatch.nct_id)
+        .join(SearchKeyword, SearchKeyword.id == TrialKeywordMatch.keyword_id)
+        .where(
+            and_(
+                TrialKeywordMatch.nct_id == ClinicalTrial.nct_id,
+                SearchKeyword.is_active.is_(True),
+            )
+        )
+        .exists()
+    )
+
+
+def _active_keyword_match_exists_for_irrelevant() -> Any:
+    return (
+        select(TrialKeywordMatch.nct_id)
+        .join(SearchKeyword, SearchKeyword.id == TrialKeywordMatch.keyword_id)
+        .where(
+            and_(
+                TrialKeywordMatch.nct_id == IrrelevantTrial.nct_id,
+                SearchKeyword.is_active.is_(True),
+            )
+        )
+        .exists()
+    )
+
+
+def _any_keyword_match_exists_for_clinical() -> Any:
+    return (
+        select(TrialKeywordMatch.nct_id)
+        .where(TrialKeywordMatch.nct_id == ClinicalTrial.nct_id)
+        .exists()
+    )
+
+
+def _any_keyword_match_exists_for_irrelevant() -> Any:
+    return (
+        select(TrialKeywordMatch.nct_id)
+        .where(TrialKeywordMatch.nct_id == IrrelevantTrial.nct_id)
+        .exists()
+    )
+
+
+async def _prune_non_approved_trials_without_active_keywords(db: AsyncSession) -> int:
+    active_ids_result = await db.execute(
+        select(TrialKeywordMatch.nct_id)
+        .join(SearchKeyword, SearchKeyword.id == TrialKeywordMatch.keyword_id)
+        .where(SearchKeyword.is_active.is_(True))
+        .distinct()
+    )
+    active_nct_ids = [row.nct_id for row in active_ids_result]
+
+    if active_nct_ids:
+        clinical_result = await db.execute(
+            select(ClinicalTrial.nct_id).where(
+                ClinicalTrial.status != TrialStatus.APPROVED,
+                ClinicalTrial.nct_id.notin_(active_nct_ids),
+            )
+        )
+        irrelevant_result = await db.execute(
+            select(IrrelevantTrial.nct_id).where(IrrelevantTrial.nct_id.notin_(active_nct_ids))
+        )
+    else:
+        clinical_result = await db.execute(
+            select(ClinicalTrial.nct_id).where(ClinicalTrial.status != TrialStatus.APPROVED)
+        )
+        irrelevant_result = await db.execute(select(IrrelevantTrial.nct_id))
+
+    stale_clinical_ids = [row.nct_id for row in clinical_result]
+    stale_irrelevant_ids = [row.nct_id for row in irrelevant_result]
+    stale_ids = stale_clinical_ids + stale_irrelevant_ids
+
+    if stale_clinical_ids:
+        await db.execute(delete(ClinicalTrial).where(ClinicalTrial.nct_id.in_(stale_clinical_ids)))
+    if stale_irrelevant_ids:
+        await db.execute(delete(IrrelevantTrial).where(IrrelevantTrial.nct_id.in_(stale_irrelevant_ids)))
+    if stale_ids:
+        await db.execute(delete(TrialKeywordMatch).where(TrialKeywordMatch.nct_id.in_(stale_ids)))
+
+    return len(stale_ids)
+
+
+@router.get("/keywords", response_model=List[SearchKeywordOut])
+async def list_keywords(
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await _ensure_default_keywords(db)
+    stmt = select(SearchKeyword).order_by(SearchKeyword.term.asc())
+    result = await db.execute(stmt)
+    return result.scalars().all()
+
+
+@router.post("/keywords", response_model=SearchKeywordOut)
+async def create_keyword(
+    body: SearchKeywordCreateBody,
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
+    normalized = _normalize_keyword_term(body.term)
+    existing = await db.execute(select(SearchKeyword).where(SearchKeyword.term == normalized))
+    if existing.scalars().first():
+        raise HTTPException(status_code=409, detail="Keyword already exists")
+
+    keyword = SearchKeyword(term=normalized, is_active=True)
+    db.add(keyword)
+    await db.commit()
+    await db.refresh(keyword)
+    return keyword
+
+
+@router.patch("/keywords/{keyword_id}", response_model=SearchKeywordOut)
+async def update_keyword(
+    keyword_id: int,
+    body: SearchKeywordUpdateBody,
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
+    keyword = await db.get(SearchKeyword, keyword_id)
+    if not keyword:
+        raise HTTPException(status_code=404, detail="Keyword not found")
+
+    keyword.is_active = body.is_active
+    keyword.updated_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(keyword)
+    return keyword
+
+
+@router.delete("/keywords/{keyword_id}")
+async def delete_keyword(
+    keyword_id: int,
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
+    keyword = await db.get(SearchKeyword, keyword_id)
+    if not keyword:
+        raise HTTPException(status_code=404, detail="Keyword not found")
+
+    await db.delete(keyword)
+    pruned_trials = await _prune_non_approved_trials_without_active_keywords(db)
+    await db.commit()
+    return {"deleted": True, "pruned_trials": pruned_trials}
+
+
 @router.get("/trials/facets", response_model=TrialFacets)
 async def get_trial_facets(db: AsyncSession = Depends(get_db)):
     """
@@ -376,7 +597,13 @@ async def get_review_queue(
     """Return all PENDING_REVIEW trials, ordered by last update date."""
     stmt = (
         select(ClinicalTrial)
-        .where(ClinicalTrial.status == TrialStatus.PENDING_REVIEW)
+        .where(
+            ClinicalTrial.status == TrialStatus.PENDING_REVIEW,
+            or_(
+                _active_keyword_match_exists_for_clinical(),
+                ~_any_keyword_match_exists_for_clinical(),
+            ),
+        )
         .order_by(ClinicalTrial.last_update_post_date.desc())
     )
     result = await db.execute(stmt)
@@ -459,6 +686,15 @@ async def get_trials(
     elif status:
         stmt = stmt.where(ClinicalTrial.status == status)
 
+    if is_authenticated:
+        stmt = stmt.where(
+            or_(
+                ClinicalTrial.status == TrialStatus.APPROVED,
+                _active_keyword_match_exists_for_clinical(),
+                ~_any_keyword_match_exists_for_clinical(),
+            )
+        )
+
     if ingestion_event and is_authenticated:
         stmt = stmt.where(ClinicalTrial.ingestion_event == ingestion_event)
     if phase:
@@ -514,7 +750,12 @@ async def get_irrelevant_trials(
     db: AsyncSession = Depends(get_db),
 ):
     """List irrelevant trials (AI-rejected) with search, sorting, and pagination. Admin only."""
-    stmt = select(IrrelevantTrial)
+    stmt = select(IrrelevantTrial).where(
+        or_(
+            _active_keyword_match_exists_for_irrelevant(),
+            ~_any_keyword_match_exists_for_irrelevant(),
+        )
+    )
 
     if q:
         stmt = stmt.where(
@@ -778,25 +1019,69 @@ async def start_ingestion(_user: dict = Depends(clerk_user)):
     if _ingestion_lock.locked():
         raise HTTPException(status_code=409, detail="Ingestion already running")
 
+    global _ingestion_stop_requested
+    _ingestion_stop_requested = False
+    _ingestion_pause_event.set()
+
     _ingestion_status["running"] = True
+    _ingestion_status["paused"] = False
+    _ingestion_status["stop_requested"] = False
     _ingestion_status["steps"] = copy.deepcopy(_STEP_TEMPLATE)
     _ingestion_status["error"] = None
     _ingestion_status["summary"] = None
 
     async def _run() -> None:
+        global _ingestion_stop_requested
         async with _ingestion_lock:
             try:
                 import app.services.ingestion as ingestion
                 await ingestion.run_daily_ingestion(
-                    progress_callback=_ingestion_progress_callback
+                    progress_callback=_ingestion_progress_callback,
+                    should_stop=_ingestion_should_stop,
+                    wait_if_paused=_ingestion_wait_if_paused,
                 )
+            except asyncio.CancelledError:
+                _ingestion_status["summary"] = {"step": "complete", "label": "Stopped by admin", "stopped": True}
             except Exception as exc:
                 _ingestion_status["error"] = str(exc)
             finally:
                 _ingestion_status["running"] = False
+                _ingestion_status["paused"] = False
+                _ingestion_status["stop_requested"] = False
+                _ingestion_stop_requested = False
+                _ingestion_pause_event.set()
 
     asyncio.create_task(_run())
     return {"started": True}
+
+
+@router.post("/ingestion/pause")
+async def pause_ingestion(_user: dict = Depends(clerk_user)):
+    if not _ingestion_status.get("running"):
+        raise HTTPException(status_code=409, detail="Ingestion is not running")
+    _ingestion_pause_event.clear()
+    _ingestion_status["paused"] = True
+    return {"paused": True}
+
+
+@router.post("/ingestion/resume")
+async def resume_ingestion(_user: dict = Depends(clerk_user)):
+    if not _ingestion_status.get("running"):
+        raise HTTPException(status_code=409, detail="Ingestion is not running")
+    _ingestion_pause_event.set()
+    _ingestion_status["paused"] = False
+    return {"paused": False}
+
+
+@router.post("/ingestion/stop")
+async def stop_ingestion(_user: dict = Depends(clerk_user)):
+    global _ingestion_stop_requested
+    if not _ingestion_status.get("running"):
+        raise HTTPException(status_code=409, detail="Ingestion is not running")
+    _ingestion_stop_requested = True
+    _ingestion_pause_event.set()
+    _ingestion_status["stop_requested"] = True
+    return {"stop_requested": True}
 
 
 @router.get("/ingestion/status")
@@ -818,6 +1103,8 @@ class IngestionRunOut(BaseModel):
     irrelevant_processed: int
     fetch_errors: int
     classify_errors: int
+    skipped_unchanged: int
+    pruned_trials: int
 
 
 class IngestionHistoryResponse(BaseModel):
