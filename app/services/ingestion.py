@@ -41,13 +41,6 @@ Status assignment in Step 6:
 This means an updated trial that the AI re-classifies as confident stays APPROVED
 without bouncing back to PENDING_REVIEW. Updated trials that drop to "unsure" do
 revert to PENDING_REVIEW so editors can re-check the changed content.
-
-UPDATED-trial review guardrail (`_update_requires_review`):
-  A confident AI verdict is overridden back to PENDING_REVIEW when the trial's
-  overall_status transitions from a "not recruiting" state (NOT_YET_RECRUITING,
-  ACTIVE_NOT_RECRUITING, ENROLLING_BY_INVITATION, COMPLETED, TERMINATED, WITHDRAWN,
-  SUSPENDED) to RECRUITING *and* the brief_summary text has changed. Pure location
-  changes, status closures, and eligibility tweaks continue to auto-approve.
 """
 
 import asyncio
@@ -73,43 +66,6 @@ logger = logging.getLogger(__name__)
 
 # Stored in ClinicalTrial.approved_by to distinguish AI vs. human approvals.
 AI_APPROVER = "ai"
-
-# Recruitment-status sets used by the UPDATED-trial review guardrail.
-# ClinicalTrials.gov returns these as upper-snake-case strings on `overall_status`.
-NOT_RECRUITING_STATUSES = frozenset({
-    "NOT_YET_RECRUITING",
-    "ACTIVE_NOT_RECRUITING",
-    "ENROLLING_BY_INVITATION",
-    "COMPLETED",
-    "TERMINATED",
-    "WITHDRAWN",
-    "SUSPENDED",
-})
-RECRUITING_STATUSES = frozenset({"RECRUITING"})
-
-
-def _update_requires_review(snapshot: dict | None, trial_data: dict) -> bool:
-    """Return True if an UPDATED trial's changes warrant human review even when
-    the AI classifies it confidently.
-
-    Why: an APPROVED trial that reopens for recruitment with a substantively rewritten
-    brief_summary (the NCT07052383 pattern) carries enough new information that an
-    editor should re-read it. Other change patterns — location updates, status closures,
-    eligibility tweaks — keep their existing AI-driven auto-approval behaviour.
-    """
-    if not snapshot:
-        return False
-    prev_status = (snapshot.get("overall_status") or "").upper()
-    new_status = (trial_data.get("overall_status") or "").upper()
-    prev_summary = (snapshot.get("brief_summary") or "").strip()
-    new_summary = (trial_data.get("brief_summary") or "").strip()
-
-    became_recruiting = (
-        prev_status in NOT_RECRUITING_STATUSES
-        and new_status in RECRUITING_STATUSES
-    )
-    summary_changed = prev_summary != new_summary
-    return became_recruiting and summary_changed
 
 
 ProgressCallback = Optional[Callable[[dict[str, Any]], Coroutine[Any, Any, None]]]
@@ -504,15 +460,7 @@ async def run_daily_ingestion(
 
             # Confident classifications auto-approve and skip human review.
             # Unsure classifications still land in PENDING_REVIEW for editorial review.
-            # Guardrail for UPDATED trials: a recruitment reopen combined with a
-            # substantively rewritten brief_summary requires a human re-check even
-            # if the AI is confident.
-            is_confident = classification.label == ConfidenceLabel.CONFIDENT
-            needs_update_review = (
-                event == IngestionEvent.UPDATED
-                and _update_requires_review(snapshot, trial_data)
-            )
-            if is_confident and not needs_update_review:
+            if classification.label == ConfidenceLabel.CONFIDENT:
                 status = TrialStatus.APPROVED
                 approved_at = now
                 approved_by = AI_APPROVER
