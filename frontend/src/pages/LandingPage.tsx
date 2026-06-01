@@ -120,15 +120,15 @@ const EXAMPLES = [
 
 const LABEL_CONFIG = {
   confident: {
-    text: 'Confident',
+    text: 'Match',
     bg: 'bg-green-100',
     border: 'border-green-200',
     textColor: 'text-green-800',
     dot: 'bg-green-500',
-    desc: 'Clearly relevant — osteosarcoma patients can enrol',
+    desc: 'Clearly relevant — published automatically',
   },
   unsure: {
-    text: 'Unsure',
+    text: 'Partial Match',
     bg: 'bg-yellow-100',
     border: 'border-yellow-200',
     textColor: 'text-yellow-800',
@@ -136,7 +136,7 @@ const LABEL_CONFIG = {
     desc: 'Uncertain eligibility — sent to human review',
   },
   reject: {
-    text: 'Reject',
+    text: 'Not Suitable',
     bg: 'bg-red-100',
     border: 'border-red-200',
     textColor: 'text-red-800',
@@ -195,24 +195,28 @@ const PIPELINE_STEPS = [
   },
   {
     number: 4,
-    title: 'Human Review',
-    summary: 'Editorial team at Osteosarcoma Now checks every trial',
+    title: 'Publish & Review',
+    summary: 'Match trials publish automatically; Partial Match trials go to the editorial team',
     detail: (
       <div className="space-y-3 text-sm text-gray-600">
         <p>
-          Every trial classified as <strong>confident</strong> or <strong>unsure</strong>{' '}
-          lands in a private review queue. A human reviewer from the Osteosarcoma Now
+          Trials classified as <strong>confident</strong> (Match) are approved automatically
+          and published straight away. Trials classified as <strong>unsure</strong> (Partial
+          Match) land in a private review queue, where a reviewer from the Osteosarcoma Now
           Foundation reads the AI's classification reason, checks the original trial data,
           and can edit any field before making a final call.
         </p>
         <p>
-          The reviewer can <strong>approve</strong> the trial (it goes live), or{' '}
-          <strong>reject</strong> it (it's removed from the public database). If a
-          previously approved trial is updated on ClinicalTrials.gov, it automatically
-          re-enters the review queue with a diff showing exactly what changed.
+          The reviewer can <strong>approve</strong> a queued trial (it goes live), or{' '}
+          <strong>reject</strong> it (it's removed from the public database). When an
+          already-published trial is updated on ClinicalTrials.gov, purely administrative
+          changes (dates, contact details, locations) are synced silently. A confident
+          re-classification stays published — except when a trial reopens for recruitment
+          with a rewritten summary, which is sent back for a human re-check with a diff
+          showing exactly what changed.
         </p>
         <p className="text-gray-500 italic">
-          AI is the first pass. Humans make the final call.
+          AI handles the clear matches. Humans make the call on everything uncertain.
         </p>
       </div>
     ),
@@ -538,9 +542,10 @@ export function LandingPage() {
           <div>
             <p className="font-semibold text-blue-900 text-sm">Runs automatically every 24 hours</p>
             <p className="text-sm text-blue-700 mt-1">
-              When a trial is updated on ClinicalTrials.gov, it is re-fetched, re-classified,
-              and sent back through human review — with a diff showing exactly what changed.
-              Nothing slips through, and no trial is ever silently outdated.
+              When a trial is updated on ClinicalTrials.gov, it is re-fetched and
+              re-classified. Substantive changes can send it back through human review —
+              with a diff showing exactly what changed. Nothing slips through, and no trial
+              is ever silently outdated.
             </p>
           </div>
         </div>
@@ -553,8 +558,8 @@ export function LandingPage() {
             Find a trial that fits
           </h2>
           <p className="text-sm text-gray-500 mb-8 max-w-md mx-auto">
-            Every trial in this database has been automatically screened and manually
-            reviewed for relevance to osteosarcoma.
+            Every trial in this database has been automatically screened for relevance to
+            osteosarcoma, with uncertain cases reviewed by the editorial team.
           </p>
           <Link
             to="/trials"
