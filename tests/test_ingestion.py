@@ -2,9 +2,11 @@
 Unit tests for the ingestion pipeline (app/services/ingestion.py).
 
 Covers:
-- New trial: classified relevant → stored as PENDING_REVIEW in clinical_trials
+- New trial: classified confident → auto-approved (status=APPROVED, approved_by="ai")
+- New trial: classified unsure → stored as PENDING_REVIEW for editorial review
 - New trial: classified irrelevant → stored in irrelevant_trials
-- Updated trial (date changed): re-processed, status reset to PENDING_REVIEW
+- Updated trial (date changed) re-classified confident: stays APPROVED
+- Updated trial (date changed) re-classified unsure: resets to PENDING_REVIEW
 - Rejected trial re-evaluated when date changed: moved to clinical_trials
 - Rejected trial with same date: not re-evaluated (skipped)
 - Trial in clinical_trials reclassified as irrelevant: row removed from clinical_trials
@@ -28,6 +30,7 @@ from app.db.database import Base
 from app.db.models import ClinicalTrial, IngestionEvent, IngestionRun, IrrelevantTrial, TrialStatus
 from app.services.ai.schemas import ClassificationResult, ConfidenceLabel
 from app.services.ctgov.study_detail import map_api_to_model
+from app.services.ingestion import AI_APPROVER
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -121,8 +124,9 @@ def _make_mock_ai_client(
 # ─── Tests ───────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_new_relevant_trial_stored_as_pending_review(tmp_path, monkeypatch):
-    """A brand-new relevant trial should be stored in clinical_trials as PENDING_REVIEW."""
+async def test_new_confident_trial_auto_approved(tmp_path, monkeypatch):
+    """A brand-new confident-classified trial should be auto-approved (status=APPROVED,
+    approved_by=AI_APPROVER) and skip the human review queue."""
     engine, factory = _make_test_db(tmp_path)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -159,11 +163,60 @@ async def test_new_relevant_trial_stored_as_pending_review(tmp_path, monkeypatch
     async with factory() as db:
         trial = await db.get(ClinicalTrial, "NCT11111111")
         assert trial is not None
-        assert trial.status == TrialStatus.PENDING_REVIEW
+        assert trial.status == TrialStatus.APPROVED
+        assert trial.approved_by == AI_APPROVER
+        assert trial.approved_at is not None
         assert trial.brief_title == "Test Osteosarcoma Trial"
         assert trial.custom_brief_summary == "AI-generated summary"
         # custom_brief_title is a passthrough from the API, not AI-generated
         assert trial.custom_brief_title == "Test Osteosarcoma Trial"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_new_unsure_trial_stays_pending_review(tmp_path, monkeypatch):
+    """A brand-new unsure-classified trial should remain in PENDING_REVIEW for
+    editorial review (no auto-approval)."""
+    engine, factory = _make_test_db(tmp_path, "test_unsure_new.db")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    trial_dict = make_trial_dict(nct_id="NCT_UNSURE_NEW")
+
+    monkeypatch.setattr("app.services.ingestion.SessionLocal", factory)
+    monkeypatch.setattr(
+        "app.services.ingestion.iter_study_index_rows",
+        lambda **kwargs: [("NCT_UNSURE_NEW", "2024-06-01")],
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.fetch_full_study",
+        lambda nct_id: {"protocolSection": {}},
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.map_api_to_model",
+        lambda raw: trial_dict.copy(),
+    )
+    monkeypatch.setattr("app.services.ingestion.AIClient", lambda: _make_mock_ai_client())
+    monkeypatch.setattr(
+        "app.services.ingestion.ai_generate_summaries",
+        AsyncMock(return_value=FAKE_AI_SUMMARIES),
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.classify_trial",
+        AsyncMock(return_value=make_classification(label=ConfidenceLabel.UNSURE)),
+    )
+
+    from app.services.ingestion import run_daily_ingestion
+    await run_daily_ingestion(search_terms=["osteosarcoma"])
+
+    async with factory() as db:
+        trial = await db.get(ClinicalTrial, "NCT_UNSURE_NEW")
+        assert trial is not None
+        assert trial.status == TrialStatus.PENDING_REVIEW
+        assert trial.approved_by is None
+        assert trial.approved_at is None
+        assert trial.ai_relevance_label == "unsure"
 
     await engine.dispose()
 
@@ -213,9 +266,9 @@ async def test_new_irrelevant_trial_stored_in_irrelevant_table(tmp_path, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_updated_trial_resets_status_to_pending_review(tmp_path, monkeypatch):
-    """An APPROVED trial whose date changed on ClinicalTrials.gov should be re-processed
-    and its status reset to PENDING_REVIEW."""
+async def test_updated_trial_confident_stays_approved(tmp_path, monkeypatch):
+    """An APPROVED trial whose date changed on ClinicalTrials.gov and is re-classified
+    as confident should stay APPROVED (no bounce back to PENDING_REVIEW)."""
     engine, factory = _make_test_db(tmp_path, "test3.db")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -263,8 +316,65 @@ async def test_updated_trial_resets_status_to_pending_review(tmp_path, monkeypat
     async with factory() as db:
         trial = await db.get(ClinicalTrial, "NCT33333333")
         assert trial is not None
-        assert trial.status == TrialStatus.PENDING_REVIEW
+        assert trial.status == TrialStatus.APPROVED
+        assert trial.approved_by == AI_APPROVER
         assert trial.last_update_post_date == "2024-09-01"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_updated_trial_unsure_resets_to_pending_review(tmp_path, monkeypatch):
+    """An APPROVED trial whose date changed and is now re-classified as unsure should
+    revert to PENDING_REVIEW so editors can re-check the changed content."""
+    engine, factory = _make_test_db(tmp_path, "test3_unsure_reset.db")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with factory() as db:
+        existing = ClinicalTrial(
+            nct_id="NCT33333335",
+            brief_title="Old Title",
+            last_update_post_date="2024-01-01",
+            status=TrialStatus.APPROVED,
+        )
+        db.add(existing)
+        await db.commit()
+
+    trial_dict = make_trial_dict(nct_id="NCT33333335", last_update="2024-09-01")
+
+    monkeypatch.setattr("app.services.ingestion.SessionLocal", factory)
+    monkeypatch.setattr(
+        "app.services.ingestion.iter_study_index_rows",
+        lambda **kwargs: [("NCT33333335", "2024-09-01")],
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.fetch_full_study",
+        lambda nct_id: {"protocolSection": {}},
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.map_api_to_model",
+        lambda raw: trial_dict.copy(),
+    )
+    monkeypatch.setattr("app.services.ingestion.AIClient", lambda: _make_mock_ai_client())
+    monkeypatch.setattr(
+        "app.services.ingestion.ai_generate_summaries",
+        AsyncMock(return_value=FAKE_AI_SUMMARIES),
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.classify_trial",
+        AsyncMock(return_value=make_classification(label=ConfidenceLabel.UNSURE)),
+    )
+
+    from app.services.ingestion import run_daily_ingestion
+    await run_daily_ingestion(search_terms=["osteosarcoma"])
+
+    async with factory() as db:
+        trial = await db.get(ClinicalTrial, "NCT33333335")
+        assert trial is not None
+        assert trial.status == TrialStatus.PENDING_REVIEW
+        assert trial.approved_by is None
+        assert trial.approved_at is None
 
     await engine.dispose()
 
@@ -629,7 +739,9 @@ async def test_rejected_trial_reeval_moved_to_clinical_trials(tmp_path, monkeypa
     async with factory() as db:
         clinical = await db.get(ClinicalTrial, "NCT44444444")
         assert clinical is not None
-        assert clinical.status == TrialStatus.PENDING_REVIEW
+        # Confident reclassification auto-approves; was previously irrelevant.
+        assert clinical.status == TrialStatus.APPROVED
+        assert clinical.approved_by == AI_APPROVER
         irrelevant = await db.get(IrrelevantTrial, "NCT44444444")
         assert irrelevant is None
 
@@ -833,7 +945,8 @@ async def test_ai_summarisation_failure_trial_still_processed(tmp_path, monkeypa
     async with factory() as db:
         trial = await db.get(ClinicalTrial, "NCT88888888")
         assert trial is not None
-        assert trial.status == TrialStatus.PENDING_REVIEW
+        # Confident classification → auto-approved even though summarisation failed.
+        assert trial.status == TrialStatus.APPROVED
         # custom_brief_title is a passthrough, so it should have the API value
         assert trial.custom_brief_title == "Test Osteosarcoma Trial"
         # custom_brief_summary is AI-generated, so it should be None on failure

@@ -31,9 +31,16 @@ Both share ClinicalTrialBase fields (nct_id is primary key).
 
 UPSERT BEHAVIOUR
 ================
-SQLAlchemy's session.merge() is used for both inserts and updates.  When an
-APPROVED trial is updated on ClinicalTrials.gov, the merge resets its status to
-PENDING_REVIEW so reviewers can check what changed before it goes live again.
+SQLAlchemy's session.merge() is used for both inserts and updates.
+
+Status assignment in Step 6:
+  - AI label "confident" → APPROVED, approved_by="ai" (auto-published, no human review)
+  - AI label "unsure"    → PENDING_REVIEW (queued for editorial review)
+  - AI label "reject"    → IrrelevantTrial table (not in ClinicalTrial at all)
+
+This means an updated trial that the AI re-classifies as confident stays APPROVED
+without bouncing back to PENDING_REVIEW. Updated trials that drop to "unsure" do
+revert to PENDING_REVIEW so editors can re-check the changed content.
 """
 
 import asyncio
@@ -56,6 +63,9 @@ from app.services.ctgov.study_detail import fetch_full_study, map_api_to_model
 from app.services.ingestion_skip import is_content_unchanged
 
 logger = logging.getLogger(__name__)
+
+# Stored in ClinicalTrial.approved_by to distinguish AI vs. human approvals.
+AI_APPROVER = "ai"
 
 
 ProgressCallback = Optional[Callable[[dict[str, Any]], Coroutine[Any, Any, None]]]
@@ -431,6 +441,8 @@ async def run_daily_ingestion(
     # STEP 6 — Database upsert
     # ──────────────────────────────────────────────────────────
     processed = 0
+    auto_approved = 0
+    pending_review = 0
     newly_irrelevant = 0
 
     # Used to set ingestion_event: updated_trials are UPDATED, everything else is NEW
@@ -438,15 +450,32 @@ async def run_daily_ingestion(
     updated_nct_ids = updated_nct_id_set
 
     async with SessionLocal() as db:
+        now = datetime.utcnow()
         for trial_data in to_summarize:
             nct_id = trial_data.get("nct_id")
             classification = classifications[nct_id]
             approval_history = existing_approval_map.get(nct_id, {})
             event = IngestionEvent.UPDATED if nct_id in updated_nct_ids else IngestionEvent.NEW
             snapshot = existing_snapshot_map.get(nct_id)
+
+            # Confident classifications auto-approve and skip human review.
+            # Unsure classifications still land in PENDING_REVIEW for editorial review.
+            if classification.label == ConfidenceLabel.CONFIDENT:
+                status = TrialStatus.APPROVED
+                approved_at = now
+                approved_by = AI_APPROVER
+                auto_approved += 1
+            else:
+                status = TrialStatus.PENDING_REVIEW
+                approved_at = None
+                approved_by = None
+                pending_review += 1
+
             trial = ClinicalTrial(
                 **trial_data,
-                status=TrialStatus.PENDING_REVIEW,
+                status=status,
+                approved_at=approved_at,
+                approved_by=approved_by,
                 ingestion_event=event,
                 ai_relevance_label=classification.label.value,
                 ai_relevance_reason=classification.reason,
@@ -514,6 +543,8 @@ async def run_daily_ingestion(
         "updated": updated_trials_count,
         "skipped_unchanged": skipped_unchanged_count,
         "relevant": processed,
+        "auto_approved": auto_approved,
+        "pending_review": pending_review,
         "irrelevant": newly_irrelevant,
         "fetch_errors": fetch_errors,
         "classify_errors": classify_errors,
@@ -521,7 +552,7 @@ async def run_daily_ingestion(
 
     logger.info(
         "Ingestion complete: %d new, %d updated, %d skipped (unchanged), %d re-evaluated | "
-        "%d relevant (PENDING_REVIEW), %d irrelevant | "
+        "%d relevant (%d auto-approved, %d pending review), %d irrelevant | "
         "%d fetch errors, %d classify errors | "
         "search_terms=%s, total_candidates=%d",
         len(new_trials),
@@ -529,6 +560,8 @@ async def run_daily_ingestion(
         skipped_unchanged_count,
         reeval_trials_count,
         processed,
+        auto_approved,
+        pending_review,
         newly_irrelevant,
         fetch_errors,
         classify_errors,

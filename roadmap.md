@@ -41,7 +41,10 @@ Phases 1–3 complete; Phase 4 in progress. The ingestion pipeline is fully oper
   - All Trials (`/admin/trials`) — all statuses visible, full status/event filters
   - Ingestion progress modal — step-by-step progress bars via SSE, shows counts per step
 - `approved_by`/`rejected_by` pulled from Clerk `user.primaryEmailAddress` (was hardcoded to `"admin"`)
-- 53 tests passing (API, ingestion pipeline, AI services)
+- **AI auto-approval for confident classifications** (issue #59): the ingestion pipeline now sets `status=APPROVED` and `approved_by="ai"` for trials the AI is confident about, so they are published immediately without sitting in the review queue. Only `unsure` classifications still land in `PENDING_REVIEW`. Updated trials that drop from confident to unsure revert to `PENDING_REVIEW` so editors can re-check the changed content.
+- **Public viewer (OSN-facing) layout refresh**: trial detail page keeps the contact details (name / phone / email) in the Key facts box, falls back to a "View on ClinicalTrials.gov" link when no contact exists, shows Interventions as a collapsible section, and ends with a static "What to do next" guidance block. Admin view unchanged.
+- **AI label display rename**: admin-facing UI now shows `Match` / `Partial Match` / `Not Suitable` instead of the underlying `confident` / `unsure` / `reject` values. The database, prompt, and API contract still use the original enum strings — display-only change in `AiClassificationCard`, `ReviewQueuePage`, and `LandingPage`.
+- 68 tests passing (API, ingestion pipeline, AI services, UPDATED-trial guardrail)
 - APScheduler running ingestion on configurable schedule (default 24 h)
 - Development environment (Docker/SQLite), Railway deployment, GitHub Actions CI
 
@@ -296,7 +299,7 @@ These are things that need a decision before or during implementation:
 
 2. **AI summarization model**: Should summarization use the same `gpt-4o-mini` as classification, or a more capable model for better quality summaries? Cost vs. quality tradeoff.
 
-3. **Re-evaluation of approved trials**: If a trial is `APPROVED` and the next daily run finds it has been updated, should we reset it to `PENDING_REVIEW` automatically? (This is specified in Phase 1.5.) Confirm this is the intended behaviour — it means approved trials could disappear from the published list until reviewed again.
+3. ~~**Re-evaluation of approved trials**: If a trial is `APPROVED` and the next daily run finds it has been updated, should we reset it to `PENDING_REVIEW` automatically?~~ **Resolved (issue #59):** when a previously-APPROVED trial is re-ingested, the new status follows the fresh AI label — confident keeps it APPROVED (no churn), unsure resets to PENDING_REVIEW so editors can re-check the changed content.
 
 4. **Auth provider choice**: Clerk, Auth0, or Supabase Auth? This affects the implementation in Phase 4.
 
