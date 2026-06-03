@@ -107,6 +107,7 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
     const eligibility   = trial.custom_eligibility_criteria    || trial.eligibility_criteria;
     const intervention  = trial.custom_intervention_description || trial.intervention_description;
     const statusLabel   = status ? getOverallStatusDisplay(status).label : null;
+    const hasContact    = Boolean(contact || phone || email);
 
     return (
       <div className="max-w-4xl mx-auto px-6 py-8 space-y-7">
@@ -144,48 +145,41 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
           <p className="text-base text-gray-600 leading-relaxed">{summary}</p>
         )}
 
-        {/* Info box */}
+        {/* Key facts */}
         <div className="bg-blue-50 border border-blue-100 rounded-xl p-6">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-10 gap-y-5">
-            {/* Column 1 */}
             <div className="space-y-5">
-              {country  && <InfoField label="Country">{country}</InfoField>}
-              {city     && <InfoField label="Location">{city}</InfoField>}
-              {type     && <InfoField label="Trial Type">{type}</InfoField>}
-              {phase    && <InfoField label="Trial Phase">{formatPhase(phase)}</InfoField>}
+              {country && <InfoField label="Country">{country}</InfoField>}
+              {city && <InfoField label="Location">{city}</InfoField>}
+              {type && <InfoField label="Trial Type">{type}</InfoField>}
             </div>
-
-            {/* Column 2 */}
             <div className="space-y-5">
+              {phase && <InfoField label="Trial Phase">{formatPhase(phase)}</InfoField>}
               {statusLabel && <InfoField label="Trial Status">{statusLabel}</InfoField>}
               {minAge && <InfoField label="Minimum Age">{minAge}</InfoField>}
-              {maxAge && <InfoField label="Maximum Age">{maxAge}</InfoField>}
             </div>
-
-            {/* Column 3 */}
             <div className="space-y-5">
+              {maxAge && <InfoField label="Maximum Age">{maxAge}</InfoField>}
               <InfoField label="Key Contact">
-                {(contact || phone || email) ? (
-                  <>
+                {hasContact ? (
+                  <div className="space-y-0.5">
                     {contact && <p>{contact}</p>}
-                    {phone   && <p className="text-gray-500">{phone}</p>}
-                    {email   && (
-                      <a href={`mailto:${email}`} className="text-blue-600 hover:underline break-all">
-                        {email}
-                      </a>
+                    {phone && (
+                      <a href={`tel:${phone}`} className="block text-blue-700 hover:underline">{phone}</a>
                     )}
-                  </>
+                    {email && (
+                      <a href={`mailto:${email}`} className="block text-blue-700 hover:underline break-all">{email}</a>
+                    )}
+                  </div>
                 ) : (
-                  <p className="text-gray-500">
-                    <a
-                      href={`https://clinicaltrials.gov/study/${trial.nct_id}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 hover:underline"
-                    >
-                      View trial on ClinicalTrials.gov
-                    </a>
-                  </p>
+                  <a
+                    href={`https://clinicaltrials.gov/study/${trial.nct_id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:underline"
+                  >
+                    View trial on ClinicalTrials.gov
+                  </a>
                 )}
               </InfoField>
               <InfoField label="Clinical Trial ID">
@@ -211,13 +205,55 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
           </section>
         )}
 
-        {/* Interventions */}
+        {/* Interventions — collapsed by default; the text can be very long */}
         {intervention && (
-          <section className="space-y-2">
-            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Interventions</h2>
-            <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-line">{intervention}</p>
-          </section>
+          <details className="group border-t border-gray-100 pt-4">
+            <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-semibold text-gray-700 uppercase tracking-wide">
+              Interventions
+              <svg
+                className="w-4 h-4 text-gray-400 transition-transform group-open:rotate-180"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </summary>
+            <p className="mt-3 text-sm text-gray-600 leading-relaxed whitespace-pre-line">{intervention}</p>
+          </details>
         )}
+
+        {/* What to do next — static guidance shown on every trial */}
+        <section className="bg-gray-50 border border-gray-200 rounded-xl p-6 space-y-3">
+          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">What to do next</h2>
+          <p className="text-sm text-gray-700 leading-relaxed">
+            If you think this clinical trial may be relevant to you or your child, the next
+            step is to discuss it with your healthcare team.
+          </p>
+          <p className="text-sm text-gray-700 leading-relaxed">Before your appointment, it can help to:</p>
+          <ul className="list-disc pl-5 text-sm text-gray-700 leading-relaxed space-y-1">
+            <li>Save or print the trial information</li>
+            <li>Write down any questions you have</li>
+            <li>Check the trial location and recruitment status</li>
+            <li>Review the inclusion and exclusion criteria carefully</li>
+            <li>
+              Review these suggested questions to ask your doctor:{' '}
+              <a
+                href="https://osteosarcomanow.org/questions-for-doctor/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-600 hover:underline"
+              >
+                Questions for Your Doctor
+              </a>
+            </li>
+          </ul>
+          <p className="text-sm text-gray-700 leading-relaxed">
+            You can also contact the trial team directly using the contact information listed on
+            the study page to ask about referrals, availability and next steps.
+          </p>
+        </section>
       </div>
     );
   }

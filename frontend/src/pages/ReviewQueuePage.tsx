@@ -117,9 +117,9 @@ export function ReviewQueuePage() {
               className="w-full text-xs border border-gray-200 rounded px-2 py-1 text-gray-600 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400"
             >
               <option value="">All AI confidence levels</option>
-              <option value="confident">Confident</option>
-              <option value="unsure">Unsure</option>
-              <option value="reject">Reject</option>
+              <option value="confident">Match</option>
+              <option value="unsure">Partial Match</option>
+              <option value="reject">Not Suitable</option>
             </select>
           </div>
         </div>
