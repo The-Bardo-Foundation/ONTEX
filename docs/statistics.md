@@ -84,7 +84,7 @@ the AI label, human decision, and truncated reviewer notes.
 
 1. Loads disagreement examples (confident false positives, false negatives, resolved unsure).
 2. Fetches the **active** classifier prompt from `classifier_prompt_versions`.
-3. Asks the LLM for `{ summary, patterns, recommendations, prompt_edits }`.
+3. Sends a two-message LLM call (see [Prompt and model](#prompt-and-model) below).
 4. Merges `prompt_edits` onto the active prompt via [prompt_merge.py](../app/services/prompt_merge.py)
    (surgical find/replace anchored inside `## LABEL: "confident"`, `"unsure"`, `"reject"` sections).
 5. Returns `proposed_system_prompt` (the merged result) and persists the run in
@@ -95,6 +95,72 @@ changed lines, editable draft text, and buttons to backtest or apply.
 
 Advice history (`GET /trials/insights/advice-history`) renders the last 20 runs as a compact
 dated list so you can correlate prompt changes with whether rates improved.
+
+### Prompt and model
+
+Prompt constants live in [app/services/ai/prompts.py](../app/services/ai/prompts.py). The call
+uses `AIClient.analyze_accuracy()` with `temperature=0.2` and `response_format=json_object`.
+
+**Model (today):** `AI_MODEL` defaults to `openai/gpt-4o-mini` (via OpenRouter). This is
+shared with trial classification and summarisation. It is fast and cheap enough for routine
+advice runs, but prompt surgery benefits from stronger reasoning — a dedicated setting for
+accuracy advice (e.g. `anthropic/claude-sonnet-4` or similar) would be a sensible follow-up
+so recommendations and `prompt_edits` are more reliable before an admin applies them.
+
+#### System prompt (`ACCURACY_ADVICE_SYSTEM_PROMPT`)
+
+Roles the model as an ML evaluation analyst improving the osteosarcoma relevance classifier.
+It explains the three labels and product stakes:
+
+- `confident` → auto-published; confident errors must be zero.
+- `unsure` → every trial needs manual review; shrink this bucket.
+- `reject` → false negatives (human-approved after AI reject) are the worst outcome.
+
+The system prompt instructs the model to:
+
+- Analyse disagreement patterns from the provided cases.
+- Return **surgical** `prompt_edits`, not a full prompt rewrite.
+- Preserve structure (section order, headings, bullets, whitespace) everywhere it does not edit.
+- Place edits inside the correct sections (`## LABEL: "confident"`, `"unsure"`, `"reject"`,
+  `REJECT TRAPS`, `## CONCRETE EXAMPLES`) using `replace`, `insert_after`, `insert_before`,
+  or `append` with exact `find` anchors copied from the current prompt.
+
+Expected JSON response:
+
+```json
+{
+  "summary": "2-4 sentence overview",
+  "patterns": ["recurring disagreement themes"],
+  "recommendations": ["actionable prompt/criteria changes"],
+  "prompt_edits": [
+    { "action": "insert_after", "find": "exact anchor from prompt", "content": "new bullet" }
+  ]
+}
+```
+
+#### User prompt (`ACCURACY_ADVICE_USER_PROMPT_TEMPLATE`)
+
+Built at request time from two inputs:
+
+1. **Current classifier prompt** — the full text of the active `classifier_prompt_versions`
+   row (same prompt ingestion/backtest would use).
+2. **Disagreement cases** — every example from `confident_false_positives`, `false_negatives`,
+   and `unsure_resolved`, formatted as:
+
+```
+- Title: <brief_title>
+  AI label: <ai_relevance_label>
+  AI reason: <ai_relevance_reason>
+  Human decision: approved | rejected
+  Reviewer notes: <reviewer_notes or n/a>
+```
+
+The user message asks the model to keep confident errors at zero, shrink the unsure bucket,
+avoid false negatives, and return surgical `prompt_edits` only (no full rewritten prompt).
+
+If there are no decided disagreement examples yet, the endpoint returns a friendly message
+without calling the LLM. If the AI key is missing or the call fails after retries, it fails
+safe with an empty advice payload.
 
 ## Classifier prompt versioning
 

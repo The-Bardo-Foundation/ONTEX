@@ -51,11 +51,25 @@ verdict survives. No schema change was required — both columns already exist o
 ## AI recommendations
 
 The "Generate AI recommendations" button calls `POST /trials/insights/ai-advice`, which
-gathers the disagreement examples (confident false positives, false negatives, and resolved
-unsure trials — with the AI reason and the reviewer's notes) and asks the LLM to return
-`{ summary, patterns, recommendations }` aimed at keeping confident errors at zero,
-shrinking the unsure bucket, and avoiding false negatives. It is a no-op with a friendly
-message when there is no data, and fails safe when the AI key is missing or the call errors.
+gathers disagreement examples (confident false positives, false negatives, and resolved
+unsure trials — with the AI reason and the reviewer's notes) and sends them to the LLM
+alongside the **active classifier prompt**.
+
+The model (`AI_MODEL`, currently `openai/gpt-4o-mini` via OpenRouter) receives:
+
+- **System:** `ACCURACY_ADVICE_SYSTEM_PROMPT` — analyst role, product guardrails, and rules
+  for returning surgical `prompt_edits` (not a full rewrite). See
+  [statistics.md — Prompt and model](statistics.md#prompt-and-model).
+- **User:** `ACCURACY_ADVICE_USER_PROMPT_TEMPLATE` — the current prompt text plus formatted
+  case list (title, AI label/reason, human decision, reviewer notes).
+
+The LLM returns `{ summary, patterns, recommendations, prompt_edits }`. The server merges
+edits onto the active prompt and exposes the result as `proposed_system_prompt` in the UI.
+A stronger model dedicated to this step (e.g. Claude Sonnet) is recommended later; see
+[statistics.md](statistics.md#prompt-and-model).
+
+It is a no-op with a friendly message when there is no data, and fails safe when the AI key
+is missing or the call errors.
 
 ## Tracking accuracy over time
 
@@ -64,5 +78,6 @@ Every successful generation is appended to the `accuracy_advice_runs` table
 (confident error rate, unsure approval rate, false-negative count, examples used, AI model)
 plus the advice payload. `GET /trials/insights/advice-history` returns the last 20 runs
 (newest first), rendered as a compact dated list under the AI-advice button. This lets you
-correlate edits to `CLASSIFICATION_SYSTEM_PROMPT` with whether the rates actually improved.
+correlate edits to the versioned classifier prompt with whether the rates actually improved.
+Each run also stores `proposed_prompt` and `prompt_version_id` (migration `010`).
 Rows are small (~1-3 KB each), so the log stays negligible even over years of use.
