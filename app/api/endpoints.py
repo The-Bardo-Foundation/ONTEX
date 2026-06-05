@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import json
+import random
 import re
 from datetime import datetime
 from typing import Any, List, Optional
@@ -15,19 +16,22 @@ from app.core.config import settings
 from app.db.database import get_db
 from app.db.models import (
     AccuracyAdviceRun,
+    BacktestRun,
     ClinicalTrial,
     IngestionEvent,
     IngestionRun,
     IrrelevantTrial,
     TrialStatus,
 )
-from app.services import accuracy
+from app.services import accuracy, prompt_store
+from app.services.ai.classifier import classify_trial
 from app.services.ai.client import AIClient
 from app.services.ai.prompts import (
     ACCURACY_ADVICE_SYSTEM_PROMPT,
     ACCURACY_ADVICE_USER_PROMPT_TEMPLATE,
 )
 from app.services.ai.schemas import AccuracyAdvice
+from app.services.prompt_merge import apply_prompt_edits
 
 router = APIRouter()
 
@@ -596,10 +600,22 @@ async def generate_ai_advice(
             recommendations=[],
         )
 
-    user_prompt = ACCURACY_ADVICE_USER_PROMPT_TEMPLATE.format(cases=cases)
-    advice = await client.analyze_accuracy(
+    active_version = await prompt_store.get_active_version(db)
+    user_prompt = ACCURACY_ADVICE_USER_PROMPT_TEMPLATE.format(
+        current_prompt=active_version.content,
+        cases=cases,
+    )
+    raw_advice = await client.analyze_accuracy(
         system_prompt=ACCURACY_ADVICE_SYSTEM_PROMPT,
         user_prompt=user_prompt,
+    )
+    merged_prompt = apply_prompt_edits(active_version.content, raw_advice.prompt_edits)
+    advice = AccuracyAdvice(
+        summary=raw_advice.summary,
+        patterns=raw_advice.patterns,
+        recommendations=raw_advice.recommendations,
+        prompt_edits=raw_advice.prompt_edits,
+        proposed_system_prompt=merged_prompt,
     )
 
     examples_used = (
@@ -622,6 +638,8 @@ async def generate_ai_advice(
             summary=advice.summary,
             patterns=json.dumps(advice.patterns),
             recommendations=json.dumps(advice.recommendations),
+            proposed_prompt=advice.proposed_system_prompt or None,
+            prompt_version_id=active_version.id,
         )
     )
     await db.commit()
@@ -644,6 +662,7 @@ class AdviceRunOut(BaseModel):
     summary: Optional[str]
     patterns: List[str]
     recommendations: List[str]
+    proposed_prompt: Optional[str] = None
 
 
 class AdviceHistoryResponse(BaseModel):
@@ -689,10 +708,248 @@ async def get_advice_history(
             summary=row.summary,
             patterns=_decode_json_list(row.patterns),
             recommendations=_decode_json_list(row.recommendations),
+            proposed_prompt=row.proposed_prompt,
         )
         for row in rows
     ]
     return AdviceHistoryResponse(runs=runs)
+
+
+# ── Classifier prompt versioning + backtesting ────────────────────────────────
+
+BACKTEST_DEFAULT_SAMPLE = 60
+BACKTEST_MAX_SAMPLE = 200
+BACKTEST_CONCURRENCY = 5
+
+
+class PromptVersionOut(BaseModel):
+    id: int
+    created_at: datetime
+    source: str
+    note: Optional[str]
+    is_active: bool
+    created_by: Optional[str]
+    content: str
+
+
+class ClassifierPromptResponse(BaseModel):
+    active: Optional[PromptVersionOut]
+    versions: List[PromptVersionOut]
+
+
+class SavePromptRequest(BaseModel):
+    content: str
+    note: Optional[str] = None
+    source: str = "manual"
+    advice_run_id: Optional[int] = None
+
+
+def _prompt_version_out(version) -> PromptVersionOut:
+    return PromptVersionOut(
+        id=version.id,
+        created_at=version.created_at,
+        source=version.source,
+        note=version.note,
+        is_active=version.is_active,
+        created_by=version.created_by,
+        content=version.content,
+    )
+
+
+@router.get("/trials/classifier-prompt", response_model=ClassifierPromptResponse)
+async def get_classifier_prompt(
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the active classifier prompt plus the full version history."""
+    active = await prompt_store.get_active_version(db)
+    versions = await prompt_store.list_versions(db)
+    return ClassifierPromptResponse(
+        active=_prompt_version_out(active),
+        versions=[_prompt_version_out(v) for v in versions],
+    )
+
+
+@router.post("/trials/classifier-prompt", response_model=PromptVersionOut)
+async def save_classifier_prompt(
+    body: SavePromptRequest,
+    user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create and activate a new classifier prompt version (the Apply path)."""
+    content = body.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Prompt content cannot be empty.")
+    created_by = user.get("email") or user.get("sub", "admin")
+    version = await prompt_store.create_version(
+        db,
+        content=content,
+        source=body.source or "manual",
+        note=body.note,
+        created_by=created_by,
+        advice_run_id=body.advice_run_id,
+        activate=True,
+    )
+    return _prompt_version_out(version)
+
+
+@router.post("/trials/classifier-prompt/{version_id}/activate", response_model=PromptVersionOut)
+async def activate_classifier_prompt(
+    version_id: int,
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Roll back to (activate) an existing prompt version."""
+    version = await prompt_store.activate_version(db, version_id)
+    if version is None:
+        raise HTTPException(status_code=404, detail="Prompt version not found.")
+    return _prompt_version_out(version)
+
+
+class BacktestRequest(BaseModel):
+    prompt: str
+    sample_size: Optional[int] = None
+
+
+class BacktestMetrics(BaseModel):
+    confident_error_rate: Optional[float]
+    unsure_rate: Optional[float]
+    false_negative_count: int
+    correct_auto_count: int
+
+
+class BacktestResponse(BaseModel):
+    sample_size: int
+    candidate: BacktestMetrics
+    baseline: BacktestMetrics
+
+
+def _classifier_input(row) -> dict:
+    """Reconstruct the classifier input dict from a stored trial row."""
+    return {
+        "nct_id": row.nct_id,
+        "brief_title": row.brief_title,
+        "brief_summary": row.brief_summary,
+        "study_type": row.study_type,
+        "phase": row.phase,
+        "overall_status": row.overall_status,
+        "eligibility_criteria": row.eligibility_criteria,
+        "intervention_description": row.intervention_description,
+    }
+
+
+def _backtest_metrics(items: list[tuple[Optional[str], bool]]) -> BacktestMetrics:
+    """Compute metrics from (label, human_keep) pairs.
+
+    human_keep is True when a reviewer approved the trial (relevant), False when
+    a reviewer rejected it (irrelevant).
+    """
+    confident_total = sum(1 for label, _ in items if label == "confident")
+    confident_wrong = sum(1 for label, keep in items if label == "confident" and not keep)
+    unsure = sum(1 for label, _ in items if label == "unsure")
+    false_neg = sum(1 for label, keep in items if label == "reject" and keep)
+    correct_auto = sum(
+        1
+        for label, keep in items
+        if (label == "confident" and keep) or (label == "reject" and not keep)
+    )
+    n = len(items)
+    return BacktestMetrics(
+        confident_error_rate=(confident_wrong / confident_total) if confident_total else None,
+        unsure_rate=(unsure / n) if n else None,
+        false_negative_count=false_neg,
+        correct_auto_count=correct_auto,
+    )
+
+
+@router.post("/trials/insights/backtest", response_model=BacktestResponse)
+async def backtest_prompt(
+    body: BacktestRequest,
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-classify a sample of already-decided trials with a candidate prompt and
+    compare the resulting metrics against the current stored labels."""
+    candidate_prompt = body.prompt.strip()
+    if not candidate_prompt:
+        raise HTTPException(status_code=400, detail="Prompt cannot be empty.")
+
+    sample_size = body.sample_size or BACKTEST_DEFAULT_SAMPLE
+    sample_size = max(1, min(sample_size, BACKTEST_MAX_SAMPLE))
+
+    # Ground truth: approved clinical trials (keep) + human-rejected irrelevant
+    # trials (reject). AI-only rejections have no human verdict and are excluded.
+    approved_rows = (
+        await db.execute(
+            select(ClinicalTrial).where(ClinicalTrial.status == TrialStatus.APPROVED)
+        )
+    ).scalars().all()
+    rejected_rows = (
+        await db.execute(
+            select(IrrelevantTrial).where(IrrelevantTrial.rejected_by.isnot(None))
+        )
+    ).scalars().all()
+
+    decided = [(row, True) for row in approved_rows] + [(row, False) for row in rejected_rows]
+    if not decided:
+        raise HTTPException(
+            status_code=400,
+            detail="No human-decided trials available to backtest against.",
+        )
+
+    random.shuffle(decided)
+    decided = decided[:sample_size]
+
+    try:
+        client = AIClient()
+    except RuntimeError:
+        raise HTTPException(
+            status_code=503,
+            detail="AI analysis is unavailable: the AI API key is not configured.",
+        )
+
+    semaphore = asyncio.Semaphore(BACKTEST_CONCURRENCY)
+
+    async def _classify(row) -> str:
+        async with semaphore:
+            result = await classify_trial(client, _classifier_input(row), candidate_prompt)
+            return result.label.value
+
+    candidate_labels = await asyncio.gather(*[_classify(row) for row, _ in decided])
+
+    candidate_items = [
+        (label, keep) for label, (_, keep) in zip(candidate_labels, decided)
+    ]
+    baseline_items = [
+        (row.ai_relevance_label or "unsure", keep) for row, keep in decided
+    ]
+
+    candidate = _backtest_metrics(candidate_items)
+    baseline = _backtest_metrics(baseline_items)
+
+    active = await prompt_store.get_active_version(db)
+    db.add(
+        BacktestRun(
+            ai_model=settings.AI_MODEL,
+            prompt_version_id=active.id,
+            sample_size=len(decided),
+            confident_error_rate=candidate.confident_error_rate,
+            unsure_rate=candidate.unsure_rate,
+            false_negative_count=candidate.false_negative_count,
+            correct_auto_count=candidate.correct_auto_count,
+            baseline_confident_error_rate=baseline.confident_error_rate,
+            baseline_unsure_rate=baseline.unsure_rate,
+            baseline_false_negative_count=baseline.false_negative_count,
+            baseline_correct_auto_count=baseline.correct_auto_count,
+        )
+    )
+    await db.commit()
+
+    return BacktestResponse(
+        sample_size=len(decided),
+        candidate=candidate,
+        baseline=baseline,
+    )
 
 
 @router.get("/trials/review-queue", response_model=List[TrialListItem])

@@ -876,3 +876,199 @@ async def test_advice_without_data_does_not_persist(test_client):
 
     r = await test_client.get("/api/v1/trials/insights/advice-history")
     assert r.json() == {"runs": []}
+
+
+# ── Classifier prompt versioning ──────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_classifier_prompt_seeds_active(test_client):
+    from app.services.ai.prompts import CLASSIFICATION_SYSTEM_PROMPT
+
+    r = await test_client.get("/api/v1/trials/classifier-prompt")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["active"] is not None
+    assert body["active"]["content"] == CLASSIFICATION_SYSTEM_PROMPT
+    assert body["active"]["source"] == "seed"
+    assert body["active"]["is_active"] is True
+    assert len(body["versions"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_save_and_activate_prompt_flips_active(test_client):
+    seeded = (await test_client.get("/api/v1/trials/classifier-prompt")).json()
+    seed_id = seeded["active"]["id"]
+
+    saved = await test_client.post(
+        "/api/v1/trials/classifier-prompt",
+        json={"content": "NEW CLASSIFIER PROMPT", "note": "tweak"},
+    )
+    assert saved.status_code == 200
+    new_id = saved.json()["id"]
+    assert saved.json()["is_active"] is True
+    assert new_id != seed_id
+
+    after = (await test_client.get("/api/v1/trials/classifier-prompt")).json()
+    assert after["active"]["id"] == new_id
+    assert after["active"]["content"] == "NEW CLASSIFIER PROMPT"
+    assert len(after["versions"]) == 2
+
+    # Roll back to the seeded version.
+    rolled = await test_client.post(f"/api/v1/trials/classifier-prompt/{seed_id}/activate")
+    assert rolled.status_code == 200
+    assert rolled.json()["id"] == seed_id
+    again = (await test_client.get("/api/v1/trials/classifier-prompt")).json()
+    assert again["active"]["id"] == seed_id
+
+
+@pytest.mark.asyncio
+async def test_save_prompt_rejects_empty(test_client):
+    r = await test_client.post("/api/v1/trials/classifier-prompt", json={"content": "   "})
+    assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_activate_missing_version_returns_404(test_client):
+    r = await test_client.post("/api/v1/trials/classifier-prompt/9999/activate")
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_classify_trial_uses_passed_prompt():
+    from app.services.ai.classifier import classify_trial
+    from app.services.ai.prompts import CLASSIFICATION_SYSTEM_PROMPT
+    from app.services.ai.schemas import ClassificationResult, ConfidenceLabel
+
+    captured: dict = {}
+
+    class _FakeClient:
+        async def classify_trial(self, system_prompt, user_prompt, **kwargs):
+            captured["system_prompt"] = system_prompt
+            return ClassificationResult(label=ConfidenceLabel.UNSURE, reason="x")
+
+    await classify_trial(_FakeClient(), {"nct_id": "NCT1", "brief_title": "t"}, "MY CUSTOM PROMPT")
+    assert captured["system_prompt"] == "MY CUSTOM PROMPT"
+
+    # Falls back to the constant when no prompt is passed.
+    await classify_trial(_FakeClient(), {"nct_id": "NCT1", "brief_title": "t"})
+    assert captured["system_prompt"] == CLASSIFICATION_SYSTEM_PROMPT
+
+
+# ── POST /trials/insights/backtest ────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_backtest_rejects_empty_prompt(test_client):
+    r = await test_client.post("/api/v1/trials/insights/backtest", json={"prompt": "  "})
+    assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_backtest_no_decided_trials_returns_400(test_client):
+    r = await test_client.post("/api/v1/trials/insights/backtest", json={"prompt": "p"})
+    assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_backtest_metrics_math(test_client, db_engine, monkeypatch):
+    from app.services.ai.schemas import ClassificationResult, ConfidenceLabel
+
+    class _FakeAIClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def classify_trial(self, system_prompt, user_prompt, **kwargs):
+            # Candidate label is encoded in the trial title (in the user prompt).
+            if "want_confident" in user_prompt:
+                label = ConfidenceLabel.CONFIDENT
+            elif "want_reject" in user_prompt:
+                label = ConfidenceLabel.REJECT
+            else:
+                label = ConfidenceLabel.UNSURE
+            return ClassificationResult(label=label, reason="test")
+
+    monkeypatch.setattr("app.api.endpoints.AIClient", _FakeAIClient)
+
+    async with db_engine.begin() as conn:
+        # Human-approved (keep)
+        await conn.execute(ClinicalTrial.__table__.insert().values(
+            nct_id="NCT70000001", brief_title="want_confident keep", status=TrialStatus.APPROVED,
+            ai_relevance_label="confident",
+        ))
+        await conn.execute(ClinicalTrial.__table__.insert().values(
+            nct_id="NCT70000002", brief_title="want_reject keep", status=TrialStatus.APPROVED,
+            ai_relevance_label="unsure",
+        ))
+        # Human-rejected (reject)
+        await conn.execute(IrrelevantTrial.__table__.insert().values(
+            nct_id="NCT70000003", brief_title="want_confident drop",
+            ai_relevance_label="reject", rejected_by="admin@local",
+        ))
+        await conn.execute(IrrelevantTrial.__table__.insert().values(
+            nct_id="NCT70000004", brief_title="want_reject drop",
+            ai_relevance_label="unsure", rejected_by="admin@local",
+        ))
+
+    r = await test_client.post(
+        "/api/v1/trials/insights/backtest", json={"prompt": "candidate prompt"}
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["sample_size"] == 4
+
+    cand = body["candidate"]
+    # confident: NCT...01 (keep, correct) + NCT...03 (reject, wrong) -> 1/2 error rate
+    assert cand["confident_error_rate"] == pytest.approx(0.5)
+    assert cand["unsure_rate"] == pytest.approx(0.0)
+    # NCT...02 labelled reject but human kept -> false negative
+    assert cand["false_negative_count"] == 1
+    # NCT...01 (confident&keep) + NCT...04 (reject&drop)
+    assert cand["correct_auto_count"] == 2
+
+    base = body["baseline"]
+    # stored labels: confident(keep), unsure, reject(drop), unsure
+    assert base["confident_error_rate"] == pytest.approx(0.0)
+    assert base["unsure_rate"] == pytest.approx(0.5)
+    assert base["false_negative_count"] == 0
+    assert base["correct_auto_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_advice_persists_merged_prompt(test_client, db_engine, monkeypatch):
+    from app.services.ai.schemas import AccuracyAdvice, PromptEdit
+
+    class _FakeAIClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def analyze_accuracy(self, system_prompt, user_prompt):
+            return AccuracyAdvice(
+                summary="ok",
+                patterns=[],
+                recommendations=[],
+                prompt_edits=[
+                    PromptEdit(
+                        action="insert_after",
+                        find="REJECT TRAPS — do NOT let these trick you into rejecting:",
+                        content="\n- Added from statistics",
+                    )
+                ],
+            )
+
+    monkeypatch.setattr("app.api.endpoints.AIClient", _FakeAIClient)
+
+    async with db_engine.begin() as conn:
+        await conn.execute(IrrelevantTrial.__table__.insert().values(
+            nct_id="NCT80000001", brief_title="Confident rejected",
+            ai_relevance_label="confident", rejected_by="admin@local",
+            reviewer_notes="wrong",
+        ))
+
+    gen = await test_client.post("/api/v1/trials/insights/ai-advice")
+    assert gen.status_code == 200
+    body = gen.json()
+    assert "REJECT TRAPS — do NOT let these trick you into rejecting:\n- Added from statistics" in body["proposed_system_prompt"]
+    assert "CRITICAL PRINCIPLE" in body["proposed_system_prompt"]
+    assert len(body["prompt_edits"]) == 1
+
+    hist = await test_client.get("/api/v1/trials/insights/advice-history")
+    assert "- Added from statistics" in hist.json()["runs"][0]["proposed_prompt"]

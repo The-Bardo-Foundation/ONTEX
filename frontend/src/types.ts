@@ -199,10 +199,18 @@ export interface InsightsResponse {
   unsure_patterns: PatternBucket[];
 }
 
+export interface PromptEdit {
+  action: 'replace' | 'insert_after' | 'insert_before' | 'append';
+  find: string | null;
+  content: string;
+}
+
 export interface AccuracyAdvice {
   summary: string;
   patterns: string[];
   recommendations: string[];
+  prompt_edits: PromptEdit[];
+  proposed_system_prompt: string;
 }
 
 export interface AdviceRun {
@@ -221,8 +229,37 @@ export interface AdviceRun {
   summary: string | null;
   patterns: string[];
   recommendations: string[];
+  proposed_prompt: string | null;
 }
 
 export interface AdviceHistoryResponse {
   runs: AdviceRun[];
+}
+
+export interface PromptVersion {
+  id: number;
+  created_at: string;
+  source: string;
+  note: string | null;
+  is_active: boolean;
+  created_by: string | null;
+  content: string;
+}
+
+export interface ClassifierPromptResponse {
+  active: PromptVersion | null;
+  versions: PromptVersion[];
+}
+
+export interface BacktestMetrics {
+  confident_error_rate: number | null;
+  unsure_rate: number | null;
+  false_negative_count: number;
+  correct_auto_count: number;
+}
+
+export interface BacktestResponse {
+  sample_size: number;
+  candidate: BacktestMetrics;
+  baseline: BacktestMetrics;
 }

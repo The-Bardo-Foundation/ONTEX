@@ -2,7 +2,7 @@ import enum
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Enum, Float, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.database import Base
@@ -179,4 +179,54 @@ class AccuracyAdviceRun(Base):
     summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     patterns: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON-encoded list
     recommendations: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON-encoded list
+
+    # Full rewritten classifier prompt proposed by the LLM, plus the prompt
+    # version that was active (and analysed) when this advice was generated.
+    proposed_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    prompt_version_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+
+class ClassifierPromptVersion(Base):
+    """A versioned copy of the classifier system prompt. Exactly one row is
+    active at a time; the active row's content is what the ingestion classifier
+    uses. Old versions are retained for history and one-click rollback."""
+
+    __tablename__ = "classifier_prompt_versions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    content: Mapped[str] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(String, default="manual")  # seed | ai | manual
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    advice_run_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("accuracy_advice_runs.id"), nullable=True
+    )
+
+
+class BacktestRun(Base):
+    """One record per backtest: a candidate prompt re-classified against
+    already-decided trials, with the resulting metrics and the baseline they
+    are compared against."""
+
+    __tablename__ = "backtest_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    ai_model: Mapped[str] = mapped_column(String)
+    prompt_version_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    sample_size: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Metrics under the candidate prompt
+    confident_error_rate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    unsure_rate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    false_negative_count: Mapped[int] = mapped_column(Integer, default=0)
+    correct_auto_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Baseline (current stored labels) over the same sample, for the delta
+    baseline_confident_error_rate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    baseline_unsure_rate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    baseline_false_negative_count: Mapped[int] = mapped_column(Integer, default=0)
+    baseline_correct_auto_count: Mapped[int] = mapped_column(Integer, default=0)
 
