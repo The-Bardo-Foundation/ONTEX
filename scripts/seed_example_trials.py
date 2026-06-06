@@ -108,7 +108,7 @@ RELEVANT_TRIALS = [
         "intervention_description": "Intraoperative fluorescence imaging during resection.",
         "last_update_post_date": "2026-03-21",
         "status": TrialStatus.PENDING_REVIEW,
-        "ai_relevance_label": "UNCERTAIN",
+        "ai_relevance_label": "unsure",
         "ai_relevance_reason": "Surgical/imaging focus rather than therapeutic intervention — needs human review.",
         "ingestion_event": IngestionEvent.UPDATED,
     },
