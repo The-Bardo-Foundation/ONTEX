@@ -12,6 +12,9 @@ const FIELDS: Field[] = [
   { label: 'Brief Summary', officialKey: 'brief_summary', customKey: 'custom_brief_summary', multiline: true },
   { label: 'Overall Status', officialKey: 'overall_status', customKey: 'custom_overall_status' },
   { label: 'Phase', officialKey: 'phase', customKey: 'custom_phase' },
+  { label: 'Key Contact Name', officialKey: 'central_contact_name', customKey: 'custom_central_contact_name' },
+  { label: 'Key Contact Phone', officialKey: 'central_contact_phone', customKey: 'custom_central_contact_phone' },
+  { label: 'Key Contact Email', officialKey: 'central_contact_email', customKey: 'custom_central_contact_email' },
   { label: 'Eligibility Criteria', officialKey: 'eligibility_criteria', customKey: 'custom_eligibility_criteria', multiline: true },
   { label: 'Intervention', officialKey: 'intervention_description', customKey: 'custom_intervention_description', multiline: true },
 ];

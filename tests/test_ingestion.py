@@ -2,9 +2,11 @@
 Unit tests for the ingestion pipeline (app/services/ingestion.py).
 
 Covers:
-- New trial: classified relevant → stored as PENDING_REVIEW in clinical_trials
+- New trial: classified confident → auto-approved (status=APPROVED, approved_by="ai")
+- New trial: classified unsure → stored as PENDING_REVIEW for editorial review
 - New trial: classified irrelevant → stored in irrelevant_trials
-- Updated trial (date changed): re-processed, status reset to PENDING_REVIEW
+- Updated trial (date changed) re-classified confident: stays APPROVED
+- Updated trial (date changed) re-classified unsure: resets to PENDING_REVIEW
 - Rejected trial re-evaluated when date changed: moved to clinical_trials
 - Rejected trial with same date: not re-evaluated (skipped)
 - Trial in clinical_trials reclassified as irrelevant: row removed from clinical_trials
@@ -28,6 +30,7 @@ from app.db.database import Base
 from app.db.models import ClinicalTrial, IngestionEvent, IngestionRun, IrrelevantTrial, TrialStatus
 from app.services.ai.schemas import ClassificationResult, ConfidenceLabel
 from app.services.ctgov.study_detail import map_api_to_model
+from app.services.ingestion import AI_APPROVER
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -121,8 +124,9 @@ def _make_mock_ai_client(
 # ─── Tests ───────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_new_relevant_trial_stored_as_pending_review(tmp_path, monkeypatch):
-    """A brand-new relevant trial should be stored in clinical_trials as PENDING_REVIEW."""
+async def test_new_confident_trial_auto_approved(tmp_path, monkeypatch):
+    """A brand-new confident-classified trial should be auto-approved (status=APPROVED,
+    approved_by=AI_APPROVER) and skip the human review queue."""
     engine, factory = _make_test_db(tmp_path)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -159,11 +163,60 @@ async def test_new_relevant_trial_stored_as_pending_review(tmp_path, monkeypatch
     async with factory() as db:
         trial = await db.get(ClinicalTrial, "NCT11111111")
         assert trial is not None
-        assert trial.status == TrialStatus.PENDING_REVIEW
+        assert trial.status == TrialStatus.APPROVED
+        assert trial.approved_by == AI_APPROVER
+        assert trial.approved_at is not None
         assert trial.brief_title == "Test Osteosarcoma Trial"
         assert trial.custom_brief_summary == "AI-generated summary"
         # custom_brief_title is a passthrough from the API, not AI-generated
         assert trial.custom_brief_title == "Test Osteosarcoma Trial"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_new_unsure_trial_stays_pending_review(tmp_path, monkeypatch):
+    """A brand-new unsure-classified trial should remain in PENDING_REVIEW for
+    editorial review (no auto-approval)."""
+    engine, factory = _make_test_db(tmp_path, "test_unsure_new.db")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    trial_dict = make_trial_dict(nct_id="NCT_UNSURE_NEW")
+
+    monkeypatch.setattr("app.services.ingestion.SessionLocal", factory)
+    monkeypatch.setattr(
+        "app.services.ingestion.iter_study_index_rows",
+        lambda **kwargs: [("NCT_UNSURE_NEW", "2024-06-01")],
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.fetch_full_study",
+        lambda nct_id: {"protocolSection": {}},
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.map_api_to_model",
+        lambda raw: trial_dict.copy(),
+    )
+    monkeypatch.setattr("app.services.ingestion.AIClient", lambda: _make_mock_ai_client())
+    monkeypatch.setattr(
+        "app.services.ingestion.ai_generate_summaries",
+        AsyncMock(return_value=FAKE_AI_SUMMARIES),
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.classify_trial",
+        AsyncMock(return_value=make_classification(label=ConfidenceLabel.UNSURE)),
+    )
+
+    from app.services.ingestion import run_daily_ingestion
+    await run_daily_ingestion(search_terms=["osteosarcoma"])
+
+    async with factory() as db:
+        trial = await db.get(ClinicalTrial, "NCT_UNSURE_NEW")
+        assert trial is not None
+        assert trial.status == TrialStatus.PENDING_REVIEW
+        assert trial.approved_by is None
+        assert trial.approved_at is None
+        assert trial.ai_relevance_label == "unsure"
 
     await engine.dispose()
 
@@ -213,9 +266,9 @@ async def test_new_irrelevant_trial_stored_in_irrelevant_table(tmp_path, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_updated_trial_resets_status_to_pending_review(tmp_path, monkeypatch):
-    """An APPROVED trial whose date changed on ClinicalTrials.gov should be re-processed
-    and its status reset to PENDING_REVIEW."""
+async def test_updated_trial_confident_stays_approved(tmp_path, monkeypatch):
+    """An APPROVED trial whose date changed on ClinicalTrials.gov and is re-classified
+    as confident should stay APPROVED (no bounce back to PENDING_REVIEW)."""
     engine, factory = _make_test_db(tmp_path, "test3.db")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -263,8 +316,65 @@ async def test_updated_trial_resets_status_to_pending_review(tmp_path, monkeypat
     async with factory() as db:
         trial = await db.get(ClinicalTrial, "NCT33333333")
         assert trial is not None
-        assert trial.status == TrialStatus.PENDING_REVIEW
+        assert trial.status == TrialStatus.APPROVED
+        assert trial.approved_by == AI_APPROVER
         assert trial.last_update_post_date == "2024-09-01"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_updated_trial_unsure_resets_to_pending_review(tmp_path, monkeypatch):
+    """An APPROVED trial whose date changed and is now re-classified as unsure should
+    revert to PENDING_REVIEW so editors can re-check the changed content."""
+    engine, factory = _make_test_db(tmp_path, "test3_unsure_reset.db")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with factory() as db:
+        existing = ClinicalTrial(
+            nct_id="NCT33333335",
+            brief_title="Old Title",
+            last_update_post_date="2024-01-01",
+            status=TrialStatus.APPROVED,
+        )
+        db.add(existing)
+        await db.commit()
+
+    trial_dict = make_trial_dict(nct_id="NCT33333335", last_update="2024-09-01")
+
+    monkeypatch.setattr("app.services.ingestion.SessionLocal", factory)
+    monkeypatch.setattr(
+        "app.services.ingestion.iter_study_index_rows",
+        lambda **kwargs: [("NCT33333335", "2024-09-01")],
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.fetch_full_study",
+        lambda nct_id: {"protocolSection": {}},
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.map_api_to_model",
+        lambda raw: trial_dict.copy(),
+    )
+    monkeypatch.setattr("app.services.ingestion.AIClient", lambda: _make_mock_ai_client())
+    monkeypatch.setattr(
+        "app.services.ingestion.ai_generate_summaries",
+        AsyncMock(return_value=FAKE_AI_SUMMARIES),
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.classify_trial",
+        AsyncMock(return_value=make_classification(label=ConfidenceLabel.UNSURE)),
+    )
+
+    from app.services.ingestion import run_daily_ingestion
+    await run_daily_ingestion(search_terms=["osteosarcoma"])
+
+    async with factory() as db:
+        trial = await db.get(ClinicalTrial, "NCT33333335")
+        assert trial is not None
+        assert trial.status == TrialStatus.PENDING_REVIEW
+        assert trial.approved_by is None
+        assert trial.approved_at is None
 
     await engine.dispose()
 
@@ -335,6 +445,252 @@ async def test_updated_trial_with_unchanged_content_is_skipped(tmp_path, monkeyp
 
 
 @pytest.mark.asyncio
+async def test_updated_trial_with_only_location_change_is_skipped(tmp_path, monkeypatch):
+    """An APPROVED trial whose only changes are in IGNORED_UPDATE_FIELDS
+    (here: date + city) should skip AI, keep status, and have its official_*
+    fields silently synced to the new ClinicalTrials.gov values."""
+    engine, factory = _make_test_db(tmp_path, "test3_loc.db")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    nct_id = "NCT_LOC_ONLY"
+    new_dict = make_trial_dict(nct_id=nct_id, last_update="2024-09-01")
+    # API now reports a different city + new date, everything else identical
+    new_dict["location_city"] = "Bergen"
+    new_dict["custom_location_city"] = "Bergen"
+
+    async with factory() as db:
+        existing_payload = make_trial_dict(nct_id=nct_id, last_update="2024-01-01")
+        # existing has Oslo (default in make_trial_dict)
+        db.add(ClinicalTrial(**existing_payload, status=TrialStatus.APPROVED))
+        await db.commit()
+
+    classify_mock = AsyncMock(return_value=make_classification())
+    summarize_mock = AsyncMock(return_value=FAKE_AI_SUMMARIES)
+
+    monkeypatch.setattr("app.services.ingestion.SessionLocal", factory)
+    monkeypatch.setattr(
+        "app.services.ingestion.iter_study_index_rows",
+        lambda **kwargs: [(nct_id, "2024-09-01")],
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.fetch_full_study",
+        lambda n: {"protocolSection": {}},
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.map_api_to_model",
+        lambda raw: new_dict.copy(),
+    )
+    monkeypatch.setattr("app.services.ingestion.AIClient", lambda: _make_mock_ai_client())
+    monkeypatch.setattr("app.services.ingestion.ai_generate_summaries", summarize_mock)
+    monkeypatch.setattr("app.services.ingestion.classify_trial", classify_mock)
+
+    from app.services.ingestion import run_daily_ingestion
+    await run_daily_ingestion(search_terms=["osteosarcoma"])
+
+    classify_mock.assert_not_awaited()
+    summarize_mock.assert_not_awaited()
+
+    async with factory() as db:
+        trial = await db.get(ClinicalTrial, nct_id)
+        assert trial is not None
+        assert trial.status == TrialStatus.APPROVED
+        assert trial.last_update_post_date == "2024-09-01"
+        assert trial.location_city == "Bergen"  # ignored-field change still synced
+        # custom_* mirror for an ignored field must also sync (passthrough)
+        # so the public WordPress template doesn't serve stale data.
+        assert trial.custom_location_city == "Bergen"
+        run = (await db.execute(select(IngestionRun).order_by(IngestionRun.id.desc()))).scalars().first()
+        assert run is not None
+        assert run.skipped_unchanged == 1
+        assert run.updated_trials == 0
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_step_3_6_preserves_admin_edited_custom_field(tmp_path, monkeypatch):
+    """If admin manually edited custom_location_city, Step 3.6 must NOT overwrite
+    it when silently syncing on an ignored-field-only change."""
+    engine, factory = _make_test_db(tmp_path, "test3_admin_custom.db")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    nct_id = "NCT_ADMIN_CUSTOM"
+    existing_payload = make_trial_dict(nct_id=nct_id, last_update="2024-01-01")
+    # Admin edited the custom city to something different from official
+    existing_payload["custom_location_city"] = "Stavanger (admin override)"
+
+    new_dict = make_trial_dict(nct_id=nct_id, last_update="2024-09-01")
+    new_dict["location_city"] = "Bergen"
+
+    async with factory() as db:
+        db.add(ClinicalTrial(**existing_payload, status=TrialStatus.APPROVED))
+        await db.commit()
+
+    monkeypatch.setattr("app.services.ingestion.SessionLocal", factory)
+    monkeypatch.setattr(
+        "app.services.ingestion.iter_study_index_rows",
+        lambda **kwargs: [(nct_id, "2024-09-01")],
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.fetch_full_study",
+        lambda n: {"protocolSection": {}},
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.map_api_to_model",
+        lambda raw: new_dict.copy(),
+    )
+    classify_mock = AsyncMock(return_value=make_classification())
+    summarize_mock = AsyncMock(return_value=FAKE_AI_SUMMARIES)
+
+    monkeypatch.setattr("app.services.ingestion.AIClient", lambda: _make_mock_ai_client())
+    monkeypatch.setattr("app.services.ingestion.ai_generate_summaries", summarize_mock)
+    monkeypatch.setattr("app.services.ingestion.classify_trial", classify_mock)
+
+    from app.services.ingestion import run_daily_ingestion
+    await run_daily_ingestion(search_terms=["osteosarcoma"])
+
+    # Only an ignored field (location_city) changed → skip path. AI must NOT rerun.
+    classify_mock.assert_not_awaited()
+    summarize_mock.assert_not_awaited()
+
+    async with factory() as db:
+        trial = await db.get(ClinicalTrial, nct_id)
+        assert trial is not None
+        assert trial.location_city == "Bergen"  # official synced
+        assert trial.custom_location_city == "Stavanger (admin override)"  # preserved
+        run = (await db.execute(select(IngestionRun).order_by(IngestionRun.id.desc()))).scalars().first()
+        assert run is not None
+        assert run.skipped_unchanged == 1
+        assert run.updated_trials == 0
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_clinical_trial_contact_change_only_skips_ai(tmp_path, monkeypatch):
+    """Contact-info change with everything else identical → no AI rerun,
+    status stays APPROVED, contact fields synced on the existing row."""
+    engine, factory = _make_test_db(tmp_path, "test3_contact.db")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    nct_id = "NCT_CONTACT_ONLY"
+    existing_payload = make_trial_dict(nct_id=nct_id, last_update="2024-01-01")
+    existing_payload["central_contact_phone"] = "+47 11111111"
+
+    new_dict = make_trial_dict(nct_id=nct_id, last_update="2024-09-01")
+    new_dict["central_contact_phone"] = "+47 22222222"
+    new_dict["custom_central_contact_phone"] = "+47 22222222"
+
+    async with factory() as db:
+        db.add(ClinicalTrial(**existing_payload, status=TrialStatus.APPROVED))
+        await db.commit()
+
+    classify_mock = AsyncMock(return_value=make_classification())
+    summarize_mock = AsyncMock(return_value=FAKE_AI_SUMMARIES)
+
+    monkeypatch.setattr("app.services.ingestion.SessionLocal", factory)
+    monkeypatch.setattr(
+        "app.services.ingestion.iter_study_index_rows",
+        lambda **kwargs: [(nct_id, "2024-09-01")],
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.fetch_full_study",
+        lambda n: {"protocolSection": {}},
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.map_api_to_model",
+        lambda raw: new_dict.copy(),
+    )
+    monkeypatch.setattr("app.services.ingestion.AIClient", lambda: _make_mock_ai_client())
+    monkeypatch.setattr("app.services.ingestion.ai_generate_summaries", summarize_mock)
+    monkeypatch.setattr("app.services.ingestion.classify_trial", classify_mock)
+
+    from app.services.ingestion import run_daily_ingestion
+    await run_daily_ingestion(search_terms=["osteosarcoma"])
+
+    classify_mock.assert_not_awaited()
+    summarize_mock.assert_not_awaited()
+
+    async with factory() as db:
+        trial = await db.get(ClinicalTrial, nct_id)
+        assert trial is not None
+        assert trial.status == TrialStatus.APPROVED
+        assert trial.central_contact_phone == "+47 22222222"
+        # Mirror also synced (was a passthrough — equal to old official).
+        assert trial.custom_central_contact_phone == "+47 22222222"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_rejected_trial_only_ignored_fields_changed_skips_ai(tmp_path, monkeypatch):
+    """An IrrelevantTrial whose date + location changed (but no substantive
+    content) should NOT be re-classified. Stays irrelevant; fields synced."""
+    engine, factory = _make_test_db(tmp_path, "test_rej_skip.db")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    nct_id = "NCT_REJ_SKIP"
+    existing_payload = make_trial_dict(nct_id=nct_id, last_update="2024-01-01")
+    # IrrelevantTrial doesn't have `status`; pop fields not on the model? It
+    # uses ClinicalTrialBase fields so make_trial_dict is compatible.
+    new_dict = make_trial_dict(nct_id=nct_id, last_update="2024-09-01")
+    new_dict["location_city"] = "Trondheim"  # ignored field
+    new_dict["custom_location_city"] = "Trondheim" # ignored field
+
+    async with factory() as db:
+        db.add(IrrelevantTrial(
+            **existing_payload,
+            ai_relevance_reason="Not osteosarcoma-related",
+        ))
+        await db.commit()
+
+    classify_mock = AsyncMock(return_value=make_classification())
+    summarize_mock = AsyncMock(return_value=FAKE_AI_SUMMARIES)
+
+    monkeypatch.setattr("app.services.ingestion.SessionLocal", factory)
+    monkeypatch.setattr(
+        "app.services.ingestion.iter_study_index_rows",
+        lambda **kwargs: [(nct_id, "2024-09-01")],
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.fetch_full_study",
+        lambda n: {"protocolSection": {}},
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.map_api_to_model",
+        lambda raw: new_dict.copy(),
+    )
+    monkeypatch.setattr("app.services.ingestion.AIClient", lambda: _make_mock_ai_client())
+    monkeypatch.setattr("app.services.ingestion.ai_generate_summaries", summarize_mock)
+    monkeypatch.setattr("app.services.ingestion.classify_trial", classify_mock)
+
+    from app.services.ingestion import run_daily_ingestion
+    await run_daily_ingestion(search_terms=["osteosarcoma"])
+
+    classify_mock.assert_not_awaited()
+    summarize_mock.assert_not_awaited()
+
+    async with factory() as db:
+        irrelevant = await db.get(IrrelevantTrial, nct_id)
+        assert irrelevant is not None
+        assert irrelevant.last_update_post_date == "2024-09-01"
+        assert irrelevant.location_city == "Trondheim"  # synced
+        # No promotion to clinical_trials
+        clinical = await db.get(ClinicalTrial, nct_id)
+        assert clinical is None
+        run = (await db.execute(select(IngestionRun).order_by(IngestionRun.id.desc()))).scalars().first()
+        assert run is not None
+        assert run.skipped_unchanged == 1
+        assert run.reeval_trials == 0
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_rejected_trial_reeval_moved_to_clinical_trials(tmp_path, monkeypatch):
     """An IrrelevantTrial whose date changed should be re-evaluated; if now relevant,
     it moves to clinical_trials and is removed from irrelevant_trials."""
@@ -383,7 +739,9 @@ async def test_rejected_trial_reeval_moved_to_clinical_trials(tmp_path, monkeypa
     async with factory() as db:
         clinical = await db.get(ClinicalTrial, "NCT44444444")
         assert clinical is not None
-        assert clinical.status == TrialStatus.PENDING_REVIEW
+        # Confident reclassification auto-approves; was previously irrelevant.
+        assert clinical.status == TrialStatus.APPROVED
+        assert clinical.approved_by == AI_APPROVER
         irrelevant = await db.get(IrrelevantTrial, "NCT44444444")
         assert irrelevant is None
 
@@ -587,7 +945,8 @@ async def test_ai_summarisation_failure_trial_still_processed(tmp_path, monkeypa
     async with factory() as db:
         trial = await db.get(ClinicalTrial, "NCT88888888")
         assert trial is not None
-        assert trial.status == TrialStatus.PENDING_REVIEW
+        # Confident classification → auto-approved even though summarisation failed.
+        assert trial.status == TrialStatus.APPROVED
         # custom_brief_title is a passthrough, so it should have the API value
         assert trial.custom_brief_title == "Test Osteosarcoma Trial"
         # custom_brief_summary is AI-generated, so it should be None on failure

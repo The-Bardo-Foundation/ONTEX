@@ -9,25 +9,38 @@ PIPELINE OVERVIEW
 Step 1  Collect NCT IDs + last-update dates for each search term
 Step 2  Classify each NCT ID against the database (new / updated / rejected / no-change)
 Step 3  Fetch full trial data from ClinicalTrials.gov API v2
-Step 3.6 Skip UPDATED trials whose content hasn't changed (date-only bumps)
+Step 3.5 Capture existing custom_*/snapshot/approval state so re-ingestion
+         preserves admin edits and enables Step 3.6 comparison
+Step 3.6 Skip both UPDATED clinical_trials AND re-evaluated irrelevant_trials
+         whose only changes are in settings.IGNORED_UPDATE_FIELDS (e.g. date,
+         location, contact info). Affected rows have their official_* fields
+         silently synced - no AI re-classification, no status reset.
 Step 4  Classify relevance with AI (confident / unsure / reject)
 Step 5  Generate patient-friendly custom_* fields via AI summarisation (confident/unsure only)
-Step 6  Upsert into clinical_trials or irrelevant_trials
-Step 7  Re-evaluate previously rejected trials whose data has changed
-Step 8  Log run summary
+Step 6  Upsert into clinical_trials or irrelevant_trials; promote previously-
+        rejected NCTs to clinical_trials (and delete their IrrelevantTrial row)
+        when AI now classifies them as relevant - and vice versa
+Step 7  Log run summary
 
 TABLES
 ======
-ClinicalTrial   — relevant trials (status: PENDING_REVIEW / APPROVED / REJECTED)
-IrrelevantTrial — trials the AI marked irrelevant (kept for deduplication)
+ClinicalTrial   - relevant trials (status: PENDING_REVIEW / APPROVED / REJECTED)
+IrrelevantTrial - trials the AI marked irrelevant (kept for deduplication)
 
 Both share ClinicalTrialBase fields (nct_id is primary key).
 
 UPSERT BEHAVIOUR
 ================
-SQLAlchemy's session.merge() is used for both inserts and updates.  When an
-APPROVED trial is updated on ClinicalTrials.gov, the merge resets its status to
-PENDING_REVIEW so reviewers can check what changed before it goes live again.
+SQLAlchemy's session.merge() is used for both inserts and updates.
+
+Status assignment in Step 6:
+  - AI label "confident" → APPROVED, approved_by="ai" (auto-published, no human review)
+  - AI label "unsure"    → PENDING_REVIEW (queued for editorial review)
+  - AI label "reject"    → IrrelevantTrial table (not in ClinicalTrial at all)
+
+This means an updated trial that the AI re-classifies as confident stays APPROVED
+without bouncing back to PENDING_REVIEW. Updated trials that drop to "unsure" do
+revert to PENDING_REVIEW so editors can re-check the changed content.
 """
 
 import asyncio
@@ -47,8 +60,12 @@ from app.services.ai.schemas import ClassificationResult, ConfidenceLabel
 from app.services.ai.summarizer import ai_generate_summaries
 from app.services.ctgov import iter_study_index_rows
 from app.services.ctgov.study_detail import fetch_full_study, map_api_to_model
+from app.services.ingestion_skip import is_content_unchanged
 
 logger = logging.getLogger(__name__)
+
+# Stored in ClinicalTrial.approved_by to distinguish AI vs. human approvals.
+AI_APPROVER = "ai"
 
 
 ProgressCallback = Optional[Callable[[dict[str, Any]], Coroutine[Any, Any, None]]]
@@ -131,10 +148,10 @@ async def run_daily_ingestion(
 
         new_trials.append(nct_id)
 
-    # ──────────────────────────────────────────────────────────
-    # STEP 7 prep — Determine which rejected trials need re-evaluation
-    # (done here so reeval_list can extend trials_to_process before Step 3)
-    # ──────────────────────────────────────────────────────────
+    # Filter rejected candidates by date diff: only those whose CT.gov
+    # last_update_post_date has advanced since we last stored them are worth
+    # re-fetching. Their fetch + classify happens in the shared Steps 3–6
+    # path below (no dedicated reeval block).
     reeval_list = [
         nct_id
         for nct_id, api_date, stored_date in rejected_hits
@@ -237,10 +254,6 @@ async def run_daily_ingestion(
         "central_contact_name", "central_contact_phone", "central_contact_email",
         "eligibility_criteria", "intervention_description", "last_update_post_date",
     ]
-    # Content fields exclude last_update_post_date: a date change is what triggered
-    # the UPDATED path, so we compare everything *except* the date to decide whether
-    # actual content changed and a re-review is needed.
-    _CONTENT_FIELDS = [f for f in _SNAPSHOT_FIELDS if f != "last_update_post_date"]
 
     if trials_with_existing_edits:
         fetched_existing_ids = {
@@ -258,63 +271,94 @@ async def run_daily_ingestion(
                             for field in _CUSTOM_FIELDS
                             if getattr(row, field) is not None
                         }
-                        # Capture approval metadata and snapshot for ClinicalTrial rows
-                        if isinstance(row, ClinicalTrial):
-                            # Snapshot ALL existing trials for content-change comparison
-                            # (Step 3.6), not just approved ones.
-                            existing_snapshot_map[row.nct_id] = {
-                                field: getattr(row, field)
-                                for field in _SNAPSHOT_FIELDS
+                        # Snapshot every existing row (both tables) — Step 3.6
+                        # compares this against the freshly-fetched payload.
+                        existing_snapshot_map[row.nct_id] = {
+                            field: getattr(row, field)
+                            for field in _SNAPSHOT_FIELDS
+                        }
+                        if isinstance(row, ClinicalTrial) and row.approved_at:
+                            existing_approval_map[row.nct_id] = {
+                                "approved_at": row.approved_at,
+                                "approved_by": row.approved_by,
                             }
-                            if row.approved_at:
-                                existing_approval_map[row.nct_id] = {
-                                    "approved_at": row.approved_at,
-                                    "approved_by": row.approved_by,
-                                }
 
     # ──────────────────────────────────────────────────────────
-    # STEP 3.6 — Skip UPDATED trials whose content hasn't changed
-    # ClinicalTrials.gov sometimes bumps last_update_post_date without changing
-    # any actual content (administrative touches). For those trials, skip
-    # re-classification, re-summarisation, and status reset — just silently
-    # update the date columns so future runs don't flag them again.
+    # STEP 3.6 — Skip trials whose only changes are ignored fields
+    # ClinicalTrials.gov frequently bumps last_update_post_date for
+    # administrative touches (contact info, location adjustments) that have no
+    # bearing on relevance or summary content. For both UPDATED clinical_trials
+    # and re-evaluated irrelevant_trials, if every non-ignored field matches
+    # the stored snapshot, silently sync official_* and skip AI rerun /
+    # status reset.
     # ──────────────────────────────────────────────────────────
     updated_nct_id_set = set(updated_trials)
-    content_unchanged: list[str] = []
+    unchanged_clinical: dict[str, dict] = {}
+    unchanged_rejected: dict[str, dict] = {}
 
-    # Collect date + trial_data for candidates before mutating fetched
-    unchanged_candidates: dict[str, dict] = {
-        td["nct_id"]: td
-        for td in fetched
-        if td.get("nct_id") in updated_nct_id_set
-        and td.get("nct_id") in existing_snapshot_map
-        and all(
-            td.get(f) == existing_snapshot_map[td["nct_id"]].get(f)
-            for f in _CONTENT_FIELDS
-        )
-    }
+    for td in fetched:
+        nct_id = td.get("nct_id")
+        if not nct_id:
+            continue
+        snapshot = existing_snapshot_map.get(nct_id)
+        if not snapshot:
+            continue
+        if not is_content_unchanged(td, snapshot, settings.IGNORED_UPDATE_FIELDS):
+            continue
+        if nct_id in updated_nct_id_set:
+            unchanged_clinical[nct_id] = td
+        elif nct_id in rejected_nct_ids:
+            unchanged_rejected[nct_id] = td
 
-    if unchanged_candidates:
-        content_unchanged = list(unchanged_candidates.keys())
-        fetched = [td for td in fetched if td.get("nct_id") not in unchanged_candidates]
+    clinical_skipped = len(unchanged_clinical)
+    rejected_skipped = len(unchanged_rejected)
+
+    def _build_sync_values(nct_id: str, td: dict) -> dict:
+        """Construct the column→value dict for a Step 3.6 silent sync.
+
+        Always overwrites every official_* column with the freshly-fetched
+        value. For each ignored field that has a `custom_*` mirror column,
+        the mirror is ALSO synced — but only when the admin hasn't manually
+        edited it. "Not edited" = the stored custom value is None or still
+        equals the previous official snapshot (i.e. it's a passthrough). This
+        prevents stale `custom_*` fields from being served.
+        """
+        values = {f: td.get(f) for f in _SNAPSHOT_FIELDS}
+        snapshot = existing_snapshot_map.get(nct_id, {})
+        protected = existing_custom_map.get(nct_id, {})  # non-null customs only
+        for field in settings.IGNORED_UPDATE_FIELDS:
+            custom_field = f"custom_{field}"
+            if custom_field not in _CUSTOM_FIELDS:
+                continue
+            existing_custom = protected.get(custom_field)  # None if was null
+            existing_official = snapshot.get(field)
+            if existing_custom is None or existing_custom == existing_official:
+                values[custom_field] = td.get(field)
+        return values
+
+    if unchanged_clinical or unchanged_rejected:
+        skipped_ids = set(unchanged_clinical) | set(unchanged_rejected)
+        fetched = [td for td in fetched if td.get("nct_id") not in skipped_ids]
 
         async with SessionLocal() as db:
-            for nct_id, td in unchanged_candidates.items():
-                new_date = td.get("last_update_post_date")
+            for nct_id, td in unchanged_clinical.items():
                 await db.execute(
                     update(ClinicalTrial)
                     .where(ClinicalTrial.nct_id == nct_id)
-                    .values(
-                        last_update_post_date=new_date,
-                        custom_last_update_post_date=new_date,
-                    )
+                    .values(**_build_sync_values(nct_id, td))
+                )
+            for nct_id, td in unchanged_rejected.items():
+                await db.execute(
+                    update(IrrelevantTrial)
+                    .where(IrrelevantTrial.nct_id == nct_id)
+                    .values(**_build_sync_values(nct_id, td))
                 )
             await db.commit()
 
         await emit({
             "step": "unchanged_skipped",
             "label": "Skipped (content unchanged)",
-            "count": len(content_unchanged),
+            "count": clinical_skipped + rejected_skipped,
         })
 
     # ──────────────────────────────────────────────────────────
@@ -397,6 +441,8 @@ async def run_daily_ingestion(
     # STEP 6 — Database upsert
     # ──────────────────────────────────────────────────────────
     processed = 0
+    auto_approved = 0
+    pending_review = 0
     newly_irrelevant = 0
 
     # Used to set ingestion_event: updated_trials are UPDATED, everything else is NEW
@@ -404,15 +450,32 @@ async def run_daily_ingestion(
     updated_nct_ids = updated_nct_id_set
 
     async with SessionLocal() as db:
+        now = datetime.utcnow()
         for trial_data in to_summarize:
             nct_id = trial_data.get("nct_id")
             classification = classifications[nct_id]
             approval_history = existing_approval_map.get(nct_id, {})
             event = IngestionEvent.UPDATED if nct_id in updated_nct_ids else IngestionEvent.NEW
             snapshot = existing_snapshot_map.get(nct_id)
+
+            # Confident classifications auto-approve and skip human review.
+            # Unsure classifications still land in PENDING_REVIEW for editorial review.
+            if classification.label == ConfidenceLabel.CONFIDENT:
+                status = TrialStatus.APPROVED
+                approved_at = now
+                approved_by = AI_APPROVER
+                auto_approved += 1
+            else:
+                status = TrialStatus.PENDING_REVIEW
+                approved_at = None
+                approved_by = None
+                pending_review += 1
+
             trial = ClinicalTrial(
                 **trial_data,
-                status=TrialStatus.PENDING_REVIEW,
+                status=status,
+                approved_at=approved_at,
+                approved_by=approved_by,
                 ingestion_event=event,
                 ai_relevance_label=classification.label.value,
                 ai_relevance_reason=classification.reason,
@@ -451,21 +514,25 @@ async def run_daily_ingestion(
         await db.commit()
 
     # ──────────────────────────────────────────────────────────
-    # STEP 8 — Write ingestion run record + log summary
+    # STEP 7 — Write ingestion run record + log summary
     # ──────────────────────────────────────────────────────────
+    updated_trials_count = len(updated_trials) - clinical_skipped
+    reeval_trials_count = len(reeval_list) - rejected_skipped
+    skipped_unchanged_count = clinical_skipped + rejected_skipped
+
     async with SessionLocal() as db:
         db.add(IngestionRun(
             run_at=datetime.utcnow(),
             search_terms=json.dumps(search_terms),
             candidates_found=len(all_candidates),
             new_trials=len(new_trials),
-            updated_trials=len(updated_trials) - len(content_unchanged),
-            reeval_trials=len(reeval_list),
+            updated_trials=updated_trials_count,
+            reeval_trials=reeval_trials_count,
             relevant_processed=processed,
             irrelevant_processed=newly_irrelevant,
             fetch_errors=fetch_errors,
             classify_errors=classify_errors,
-            skipped_unchanged=len(content_unchanged),
+            skipped_unchanged=skipped_unchanged_count,
         ))
         await db.commit()
 
@@ -473,9 +540,11 @@ async def run_daily_ingestion(
         "step": "complete",
         "label": "Done",
         "new": len(new_trials),
-        "updated": len(updated_trials) - len(content_unchanged),
-        "skipped_unchanged": len(content_unchanged),
+        "updated": updated_trials_count,
+        "skipped_unchanged": skipped_unchanged_count,
         "relevant": processed,
+        "auto_approved": auto_approved,
+        "pending_review": pending_review,
         "irrelevant": newly_irrelevant,
         "fetch_errors": fetch_errors,
         "classify_errors": classify_errors,
@@ -483,14 +552,16 @@ async def run_daily_ingestion(
 
     logger.info(
         "Ingestion complete: %d new, %d updated, %d skipped (unchanged), %d re-evaluated | "
-        "%d relevant (PENDING_REVIEW), %d irrelevant | "
+        "%d relevant (%d auto-approved, %d pending review), %d irrelevant | "
         "%d fetch errors, %d classify errors | "
         "search_terms=%s, total_candidates=%d",
         len(new_trials),
-        len(updated_trials) - len(content_unchanged),
-        len(content_unchanged),
-        len(reeval_list),
+        updated_trials_count,
+        skipped_unchanged_count,
+        reeval_trials_count,
         processed,
+        auto_approved,
+        pending_review,
         newly_irrelevant,
         fetch_errors,
         classify_errors,
