@@ -220,7 +220,6 @@ Schema: [app/db/models.py](../app/db/models.py)
 | `SEARCH_TERMS` | `["osteosarcoma"]` | JSON list of CT.gov search terms |
 | `INGESTION_SCHEDULE_HOURS` | `24` | How often the scheduler fires |
 | `AI_MODEL` | `openai/gpt-4o-mini` | OpenRouter model for summarisation and classification |
-| `CONFIDENCE_THRESHOLD` | `0.7` | Min confidence below which irrelevant → forced secondary |
 | `PAGE_SIZE` | `100` | Results per CT.gov API page |
 | `IGNORED_UPDATE_FIELDS` | `last_update_post_date`, `location_country`, `location_city`, `central_contact_name`, `central_contact_phone`, `central_contact_email` | Fields whose change alone triggers a Step 3.6 silent sync instead of an AI rerun. JSON list. |
 | `OPENROUTER_API_KEY` | — | Required; app fails to start if missing |
