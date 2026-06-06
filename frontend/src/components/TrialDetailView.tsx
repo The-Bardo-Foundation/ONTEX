@@ -191,7 +191,7 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
                   <div className="space-y-0.5">
                     {contact && <p>{contact}</p>}
                     {phone && (
-                      <a href={`tel:${phone}`} className="block text-blue-700 hover:underline">{phone}</a>
+                      <a href={`tel:${phone.replace(/\s+/g, '')}`} className="block text-blue-700 hover:underline">{phone}</a>
                     )}
                     {email && (
                       <a href={`mailto:${email}`} className="block text-blue-700 hover:underline break-all">{email}</a>
