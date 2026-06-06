@@ -80,6 +80,12 @@ async def send_ingestion_summary(summary: dict[str, Any]) -> None:
         )
         return
 
+    if not settings.INGESTION_SUMMARY_FROM:
+        logger.warning(
+            "INGESTION_SUMMARY_FROM not set — skipping ingestion summary email"
+        )
+        return
+
     payload = {
         "from": settings.INGESTION_SUMMARY_FROM,
         "to": recipients,
