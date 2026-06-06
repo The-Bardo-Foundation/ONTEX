@@ -168,7 +168,7 @@ IRRELEVANT_TRIALS = [
         "location_country": "Italy",
         "location_city": "Milan",
         "last_update_post_date": "2026-04-30",
-        "ai_relevance_label": "RELEVANT",
+        "ai_relevance_label": "unsure",
         "ai_relevance_reason": "Sarcoma trial — flagged as potentially relevant by AI.",
         "rejected_at": NOW - timedelta(days=2),
         "rejected_by": "reviewer@bardo.example",
