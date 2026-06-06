@@ -81,7 +81,7 @@ RELEVANT_TRIALS = [
         "intervention_description": "Pembrolizumab 200 mg IV every 3 weeks.",
         "last_update_post_date": "2026-05-02",
         "status": TrialStatus.APPROVED,
-        "ai_relevance_label": "RELEVANT",
+        "ai_relevance_label": "confident",
         "ai_relevance_reason": "Immunotherapy trial specifically in recurrent osteosarcoma.",
         "approved_at": NOW - timedelta(days=3),
         "approved_by": "reviewer@bardo.example",
