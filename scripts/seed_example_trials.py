@@ -57,7 +57,7 @@ RELEVANT_TRIALS = [
         "intervention_description": "Mifamurtide 2 mg/m^2 IV twice weekly plus MAP backbone.",
         "last_update_post_date": "2026-04-15",
         "status": TrialStatus.PENDING_REVIEW,
-        "ai_relevance_label": "RELEVANT",
+        "ai_relevance_label": "unsure",
         "ai_relevance_reason": "Phase II interventional study in osteosarcoma — clear match.",
         "ingestion_event": IngestionEvent.NEW,
     },
