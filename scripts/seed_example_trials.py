@@ -132,7 +132,7 @@ RELEVANT_TRIALS = [
         "intervention_description": "Annual echocardiogram and cardiac MRI.",
         "last_update_post_date": "2026-02-10",
         "status": TrialStatus.APPROVED,
-        "ai_relevance_label": "RELEVANT",
+        "ai_relevance_label": "confident",
         "ai_relevance_reason": "Survivorship study in osteosarcoma population.",
         "approved_at": NOW - timedelta(days=20),
         "approved_by": "reviewer@bardo.example",
