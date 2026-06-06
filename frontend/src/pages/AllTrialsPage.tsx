@@ -6,7 +6,7 @@ import { IngestionEventBadge } from '../components/IngestionEventBadge';
 import { IrrelevantTrialDetailModal } from '../components/IrrelevantTrialDetailModal';
 import { StatusBadge } from '../components/StatusBadge';
 import type { TrialListItem, TrialsListResponse } from '../types';
-import { formatPhase, getOverallStatusDisplay } from '../utils/formatters';
+import { formatLocationSummary, formatPhase, getOverallStatusDisplay } from '../utils/formatters';
 
 const PAGE_SIZE = 20;
 
@@ -542,7 +542,7 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
                 const summary = trial.custom_brief_summary || trial.brief_summary;
                 const city = trial.custom_location_city ?? trial.location_city;
                 const country = trial.custom_location_country ?? trial.location_country;
-                const location = [city, country].filter(Boolean).join(', ');
+                const location = formatLocationSummary(city, country);
                 return (
                   <li
                     key={trial.nct_id}

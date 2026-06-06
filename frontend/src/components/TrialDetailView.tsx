@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { CustomEdits, TrialDetail } from '../types';
-import { formatPhase, getOverallStatusDisplay } from '../utils/formatters';
+import { formatLocationSummary, formatPhase, getOverallStatusDisplay, isLocationVerbose } from '../utils/formatters';
 import { AiClassificationCard } from './AiClassificationCard';
 import { FieldDiffPanel } from './FieldDiffPanel';
 import { IngestionEventBadge } from './IngestionEventBadge';
@@ -108,6 +108,8 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
     const intervention  = trial.custom_intervention_description || trial.intervention_description;
     const statusLabel   = status ? getOverallStatusDisplay(status).label : null;
     const hasContact    = Boolean(contact || phone || email);
+    const locationSummary = formatLocationSummary(city, country);
+    const locationVerbose = isLocationVerbose(city, country);
 
     return (
       <div className="max-w-4xl mx-auto px-6 py-8 space-y-7">
@@ -149,8 +151,32 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
         <div className="bg-blue-50 border border-blue-100 rounded-xl p-6">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-10 gap-y-5">
             <div className="space-y-5">
-              {country && <InfoField label="Country">{country}</InfoField>}
-              {city && <InfoField label="Location">{city}</InfoField>}
+              {locationSummary && (
+                <InfoField label="Location">
+                  <p>{locationSummary}</p>
+                  {locationVerbose && (
+                    <details className="mt-2 group">
+                      <summary className="cursor-pointer list-none text-xs text-blue-700 hover:underline">
+                        View all locations
+                      </summary>
+                      <div className="mt-2 space-y-2 text-sm text-gray-600 leading-relaxed">
+                        {country && (
+                          <p>
+                            <span className="font-medium text-gray-700">Countries: </span>
+                            {country}
+                          </p>
+                        )}
+                        {city && (
+                          <p>
+                            <span className="font-medium text-gray-700">Cities: </span>
+                            {city}
+                          </p>
+                        )}
+                      </div>
+                    </details>
+                  )}
+                </InfoField>
+              )}
               {type && <InfoField label="Trial Type">{type}</InfoField>}
             </div>
             <div className="space-y-5">
@@ -307,7 +333,7 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
                 <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
-              {[trial.location_city, trial.location_country].filter(Boolean).join(', ')}
+              {formatLocationSummary(trial.location_city, trial.location_country)}
             </span>
           )}
           {(trial.minimum_age || trial.maximum_age) && (
