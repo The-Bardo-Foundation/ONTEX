@@ -152,7 +152,7 @@ IRRELEVANT_TRIALS = [
         "location_country": "France",
         "location_city": "Paris",
         "last_update_post_date": "2026-01-08",
-        "ai_relevance_label": "IRRELEVANT",
+        "ai_relevance_label": "reject",
         "ai_relevance_reason": "Study concerns osteoporosis, not osteosarcoma — keyword match only.",
         "rejected_at": NOW - timedelta(days=10),
         "rejected_by": None,  # AI rejection
