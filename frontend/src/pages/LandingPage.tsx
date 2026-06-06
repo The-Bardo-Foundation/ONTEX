@@ -210,10 +210,9 @@ const PIPELINE_STEPS = [
           The reviewer can <strong>approve</strong> a queued trial (it goes live), or{' '}
           <strong>reject</strong> it (it's removed from the public database). When an
           already-published trial is updated on ClinicalTrials.gov, purely administrative
-          changes (dates, contact details, locations) are synced silently. A confident
-          re-classification stays published — except when a trial reopens for recruitment
-          with a rewritten summary, which is sent back for a human re-check with a diff
-          showing exactly what changed.
+          changes (dates, contact details, locations) are synced silently. Otherwise the
+          trial is re-classified: confident stays published, while unsure returns to the
+          review queue with a diff showing exactly what changed.
         </p>
         <p className="text-gray-500 italic">
           AI handles the clear matches. Humans make the call on everything uncertain.
