@@ -38,9 +38,9 @@ Status assignment in Step 6:
   - AI label "unsure"    → PENDING_REVIEW (queued for editorial review)
   - AI label "reject"    → IrrelevantTrial table (not in ClinicalTrial at all)
 
-This means an updated trial that the AI re-classifies as confident stays APPROVED
-without bouncing back to PENDING_REVIEW. Updated trials that drop to "unsure" do
-revert to PENDING_REVIEW so editors can re-check the changed content.
+Previously human-approved trials that are re-ingested as confident preserve the original
+human approver in approved_by/approved_at — AI re-confirmation does not overwrite human
+authorship. Updated trials that drop to "unsure" revert to PENDING_REVIEW.
 """
 
 import asyncio
@@ -354,10 +354,14 @@ async def _upsert_trials(
             event = IngestionEvent.UPDATED if nct_id in updated_nct_ids else IngestionEvent.NEW
             snapshot = existing_snapshot_map.get(nct_id)
 
+            # All confident classifications auto-approve — no human check needed.
+            # Previously human-approved trials preserve the original approver so
+            # AI re-ingestion does not overwrite human authorship in the audit trail.
             if classification.label == ConfidenceLabel.CONFIDENT:
                 status = TrialStatus.APPROVED
-                approved_at = now
-                approved_by = AI_APPROVER
+                prior_by = approval_history.get("approved_by")
+                approved_by = prior_by if (prior_by and prior_by != AI_APPROVER) else AI_APPROVER
+                approved_at = approval_history.get("approved_at") if approved_by != AI_APPROVER else now
                 auto_approved += 1
             else:
                 status = TrialStatus.PENDING_REVIEW
