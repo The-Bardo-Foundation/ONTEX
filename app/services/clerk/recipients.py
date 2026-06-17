@@ -32,7 +32,7 @@ _USER_LIMIT = 500
 
 
 def _primary_email(user: dict[str, Any]) -> str | None:
-    """Return the user's primary verified email, or None if not resolvable."""
+    """Return the user's primary email address, or None if not resolvable."""
     primary_id = user.get("primary_email_address_id")
     for entry in user.get("email_addresses", []):
         if entry.get("id") == primary_id:
