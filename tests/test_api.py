@@ -584,6 +584,49 @@ async def test_ingestion_status_rejects_unauthenticated(test_client, monkeypatch
     assert r.status_code == 401
 
 
+@pytest.mark.asyncio
+async def test_progress_callback_demotes_earlier_steps_to_done():
+    """Entering a later pipeline step marks earlier active steps as done so
+    their spinners stop instead of running until the final summary."""
+    import app.api.endpoints as endpoints
+    import copy
+
+    endpoints._ingestion_status.update({
+        "running": True,
+        "steps": copy.deepcopy(endpoints._STEP_TEMPLATE),
+        "error": None,
+        "summary": None,
+    })
+
+    def state(step_id: str) -> str:
+        return endpoints._find_step(step_id)["state"]
+
+    await endpoints._ingestion_progress_callback({"step": "searching"})
+    await endpoints._ingestion_progress_callback(
+        {"step": "searching_done", "count": 838}
+    )
+    await endpoints._ingestion_progress_callback(
+        {"step": "fetching_details", "count": 13, "total": 13}
+    )
+    assert state("fetching_details") == "active"
+
+    # Classification starts → fetching should flip to done, not keep spinning.
+    await endpoints._ingestion_progress_callback(
+        {"step": "classifying", "count": 13, "total": 13}
+    )
+    assert state("fetching_details") == "done"
+    assert state("classifying") == "active"
+
+    # Summarizing starts → both earlier processing steps are done.
+    await endpoints._ingestion_progress_callback(
+        {"step": "summarizing", "count": 9, "total": 11}
+    )
+    assert state("searching") == "done"
+    assert state("fetching_details") == "done"
+    assert state("classifying") == "done"
+    assert state("summarizing") == "active"
+
+
 # ── GET /ingestion/history ────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
