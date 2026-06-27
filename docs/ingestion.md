@@ -128,7 +128,7 @@ Classifies whether the trial is relevant to osteosarcoma patients:
 | `unsure` | Possibly relevant — proceeds to summarisation and queued for editorial review (`status=PENDING_REVIEW`) |
 | `reject` | No osteosarcoma connection — written directly to `irrelevant_trials`, no summary generated |
 
-**Fail-safe:** classification errors default to `unsure` so the trial is included for manual review.
+**AI failure:** if the LLM call itself fails (outage/error after retries), the trial is **skipped entirely** — no row is written — and refetched on the next daily run via the Step 2 date-diff logic. This avoids storing a verdict the AI never actually made. (A genuine `unsure` verdict, by contrast, is stored as `PENDING_REVIEW`.)
 
 - Temperature: 0.1
 - Retries: 2
@@ -207,7 +207,7 @@ Schema: [app/db/models.py](../app/db/models.py)
 |------|---------|-----------|
 | 1 — Fetch index | API/network error | Ingestion aborted |
 | 3 — Fetch study | HTTP error or timeout | Trial skipped; `fetch_errors++` |
-| 4 — AI classify | LLM error after retries | Defaults to `unsure`; logged as `classify_errors` |
+| 4 — AI classify | LLM error after retries | Trial skipped (no row written), refetched next run; logged as `classify_errors` |
 | 5 — AI summarise | LLM error after retries | `custom_*` fields left `None`; pipeline continues |
 | 6 — DB upsert | SQL error | Exception propagates; run aborted |
 

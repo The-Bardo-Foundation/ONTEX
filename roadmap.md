@@ -142,7 +142,7 @@ Create a new function `ai_generate_summaries(client, trial_data: dict) -> dict` 
 
 12 unit tests in `tests/test_ai_services.py`:
 - `ai_generate_summaries()`: success, LLM returns None (null dict), extra keys ignored
-- `classify_trial()`: confident/unsure/reject labels returned unchanged; AIClient fail-safe returns `unsure` so no trial is silently lost
+- `classify_trial()`: confident/unsure/reject labels returned unchanged; on AI failure AIClient returns `failed=True` so the ingestion pipeline skips the trial and refetches it next run
 - `AIClient`: JSON parse success for generate and classify, all-retries-exhausted returns None / safe default
 
 #### 2.3 API endpoint tests ✅

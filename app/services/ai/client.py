@@ -102,11 +102,14 @@ class AIClient:
                     "classify_trial attempt %d failed: %s", attempt + 1, e
                 )
 
-        # Never lose a trial — default to unsure so editorial team can review
+        # The AI call genuinely failed (outage/error). Flag it as failed so the
+        # ingestion pipeline skips this trial entirely and refetches it next run,
+        # rather than storing a bogus "unsure" verdict the AI never actually made.
         logger.error(
             "classify_trial failed after %d attempts: %s", 1 + max_retries, last_error
         )
         return ClassificationResult(
             label=ConfidenceLabel.UNSURE,
-            reason="AI evaluation failed -- needs manual review",
+            reason=f"AI evaluation failed: {last_error}",
+            failed=True,
         )

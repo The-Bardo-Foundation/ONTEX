@@ -125,9 +125,12 @@ This agent does NOT fetch data, write to DB, or generate summaries.
 
 - All failures (including invalid JSON responses, timeouts, and other API errors)
   may be retried according to the AI client's configured retry policy (e.g. `max_retries`).
-- After retries are exhausted, return the safe default:
-  `is_relevant=true, confidence=0.0, reason="AI evaluation failed — needs manual review"`
-- **NEVER silently drop a trial.** On any failure (after applying the retry policy), default to RELEVANT.
+- After retries are exhausted, return a `ClassificationResult` with `failed=True`
+  (label `unsure`, `reason="AI evaluation failed: <error>"`).
+- The `failed` flag tells the ingestion pipeline to **skip the trial entirely this
+  run** — no row is written — so the trial is refetched and re-evaluated on the next
+  daily run rather than parked with a verdict the AI never actually made.
+- A genuine `unsure`/`reject`/`confident` verdict always has `failed=False`.
 
 ---
 
