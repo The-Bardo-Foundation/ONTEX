@@ -78,6 +78,9 @@ export function Layout({
           <NavLink to="/admin/trials" className={adminNavLinkClass}>
             All Trials
           </NavLink>
+          <NavLink to="/admin/statistics" className={adminNavLinkClass}>
+            Statistics
+          </NavLink>
           <NavLink to="/trials" className={adminNavLinkClass}>
             Public View
           </NavLink>

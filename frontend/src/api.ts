@@ -4,7 +4,14 @@ import type {
   CustomEdits,
   IrrelevantTrialDetail,
   MarkIrrelevantBody,
+  AccuracyAdvice,
+  AdviceHistoryResponse,
+  BacktestResponse,
+  ClassifierPromptResponse,
+  InsightsResponse,
+  PromptVersion,
   RejectBody,
+  StatisticsResponse,
   TrialDetail,
   TrialListItem,
   TrialsListResponse,
@@ -69,6 +76,63 @@ export const getTrials = async (params: GetTrialsParams = {}): Promise<TrialsLis
 
 export const getTrialFacets = async (): Promise<TrialFacets> => {
   const response = await api.get<TrialFacets>('/trials/facets');
+  return response.data;
+};
+
+export const getStatistics = async (): Promise<StatisticsResponse> => {
+  const response = await api.get<StatisticsResponse>('/trials/statistics');
+  return response.data;
+};
+
+export const getInsights = async (): Promise<InsightsResponse> => {
+  const response = await api.get<InsightsResponse>('/trials/insights');
+  return response.data;
+};
+
+export const generateAiAdvice = async (): Promise<AccuracyAdvice> => {
+  const response = await api.post<AccuracyAdvice>('/trials/insights/ai-advice', {});
+  return response.data;
+};
+
+export const getAdviceHistory = async (): Promise<AdviceHistoryResponse> => {
+  const response = await api.get<AdviceHistoryResponse>('/trials/insights/advice-history');
+  return response.data;
+};
+
+export const getClassifierPrompt = async (): Promise<ClassifierPromptResponse> => {
+  const response = await api.get<ClassifierPromptResponse>('/trials/classifier-prompt');
+  return response.data;
+};
+
+export const saveClassifierPrompt = async (
+  content: string,
+  note?: string,
+  source = 'manual',
+): Promise<PromptVersion> => {
+  const response = await api.post<PromptVersion>('/trials/classifier-prompt', {
+    content,
+    note,
+    source,
+  });
+  return response.data;
+};
+
+export const activatePromptVersion = async (versionId: number): Promise<PromptVersion> => {
+  const response = await api.post<PromptVersion>(
+    `/trials/classifier-prompt/${versionId}/activate`,
+    {},
+  );
+  return response.data;
+};
+
+export const runBacktest = async (
+  prompt: string,
+  sampleSize?: number,
+): Promise<BacktestResponse> => {
+  const response = await api.post<BacktestResponse>('/trials/insights/backtest', {
+    prompt,
+    sample_size: sampleSize,
+  });
   return response.data;
 };
 

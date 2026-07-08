@@ -1,5 +1,7 @@
 import asyncio
 import copy
+import json
+import random
 import re
 from datetime import datetime
 from typing import Any, List, Optional
@@ -10,8 +12,26 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.db.database import get_db
-from app.db.models import ClinicalTrial, IngestionEvent, IngestionRun, IrrelevantTrial, TrialStatus
+from app.db.models import (
+    AccuracyAdviceRun,
+    BacktestRun,
+    ClinicalTrial,
+    IngestionEvent,
+    IngestionRun,
+    IrrelevantTrial,
+    TrialStatus,
+)
+from app.services import accuracy, prompt_store
+from app.services.ai.classifier import classify_trial
+from app.services.ai.client import AIClient
+from app.services.ai.prompts import (
+    ACCURACY_ADVICE_SYSTEM_PROMPT,
+    ACCURACY_ADVICE_USER_PROMPT_TEMPLATE,
+)
+from app.services.ai.schemas import AccuracyAdvice
+from app.services.prompt_merge import apply_prompt_edits
 
 router = APIRouter()
 
@@ -389,6 +409,563 @@ async def get_trial_facets(db: AsyncSession = Depends(get_db)):
     return TrialFacets(countries=sorted(unique))
 
 
+class AiLabelBreakdown(BaseModel):
+    label: str
+    approved: int
+    rejected: int
+    pending: int
+
+
+class StatisticsResponse(BaseModel):
+    approved_by_admin: int
+    rejected_by_admin: int
+    pending_review: int
+    ai_auto_rejected: int
+    total: int
+    ai_confident_approval_rate: Optional[float]
+    by_ai_label: List[AiLabelBreakdown]
+
+
+_AI_LABEL_ORDER = ["confident", "unsure", "reject"]
+
+
+def _normalize_label(label: Optional[str]) -> str:
+    return label if label else "none"
+
+
+@router.get("/trials/statistics", response_model=StatisticsResponse)
+async def get_statistics(
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Aggregate approval/rejection counts and how well the AI relevance label
+    agrees with the human reviewer's decision.
+
+    Human-approved trials live in clinical_trials (status=APPROVED); human-rejected
+    trials are moved to irrelevant_trials with rejected_by set; AI auto-rejected
+    trials are in irrelevant_trials with rejected_by NULL.
+    """
+
+    async def _grouped_counts(stmt) -> dict[str, int]:
+        rows = (await db.execute(stmt)).all()
+        return {_normalize_label(row[0]): row[1] for row in rows}
+
+    approved_by_label = await _grouped_counts(
+        select(ClinicalTrial.ai_relevance_label, func.count())
+        .where(ClinicalTrial.status == TrialStatus.APPROVED)
+        .group_by(ClinicalTrial.ai_relevance_label)
+    )
+    pending_by_label = await _grouped_counts(
+        select(ClinicalTrial.ai_relevance_label, func.count())
+        .where(ClinicalTrial.status == TrialStatus.PENDING_REVIEW)
+        .group_by(ClinicalTrial.ai_relevance_label)
+    )
+    human_rejected_by_label = await _grouped_counts(
+        select(IrrelevantTrial.ai_relevance_label, func.count())
+        .where(IrrelevantTrial.rejected_by.isnot(None))
+        .group_by(IrrelevantTrial.ai_relevance_label)
+    )
+
+    legacy_rejected = (
+        await db.execute(
+            select(func.count())
+            .select_from(ClinicalTrial)
+            .where(ClinicalTrial.status == TrialStatus.REJECTED)
+        )
+    ).scalar() or 0
+    ai_auto_rejected = (
+        await db.execute(
+            select(func.count())
+            .select_from(IrrelevantTrial)
+            .where(IrrelevantTrial.rejected_by.is_(None))
+        )
+    ).scalar() or 0
+
+    approved_by_admin = sum(approved_by_label.values())
+    pending_review = sum(pending_by_label.values())
+    rejected_by_admin = sum(human_rejected_by_label.values()) + legacy_rejected
+    total = approved_by_admin + rejected_by_admin + pending_review + ai_auto_rejected
+
+    confident_approved = approved_by_label.get("confident", 0)
+    confident_rejected = human_rejected_by_label.get("confident", 0)
+    confident_decided = confident_approved + confident_rejected
+    ai_confident_approval_rate = (
+        confident_approved / confident_decided if confident_decided else None
+    )
+
+    seen_labels = (
+        set(approved_by_label) | set(pending_by_label) | set(human_rejected_by_label)
+    )
+    ordered_labels = _AI_LABEL_ORDER + sorted(seen_labels - set(_AI_LABEL_ORDER))
+    by_ai_label = [
+        AiLabelBreakdown(
+            label=label,
+            approved=approved_by_label.get(label, 0),
+            rejected=human_rejected_by_label.get(label, 0),
+            pending=pending_by_label.get(label, 0),
+        )
+        for label in ordered_labels
+        if label in seen_labels
+    ]
+
+    return StatisticsResponse(
+        approved_by_admin=approved_by_admin,
+        rejected_by_admin=rejected_by_admin,
+        pending_review=pending_review,
+        ai_auto_rejected=ai_auto_rejected,
+        total=total,
+        ai_confident_approval_rate=ai_confident_approval_rate,
+        by_ai_label=by_ai_label,
+    )
+
+
+class TrialExampleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    nct_id: str
+    brief_title: str
+    ai_relevance_label: Optional[str]
+    ai_relevance_reason: Optional[str]
+    reviewer_notes: Optional[str]
+    human_decision: str
+
+
+class PatternBucketOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    dimension: str
+    value: str
+    approved: int
+    rejected: int
+
+
+class InsightsResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    confident_approved: int
+    confident_rejected: int
+    confident_error_rate: Optional[float]
+    unsure_approved: int
+    unsure_rejected: int
+    unsure_pending: int
+    unsure_approval_rate: Optional[float]
+    false_negative_count: int
+    confident_false_positives: List[TrialExampleOut]
+    unsure_resolved: List[TrialExampleOut]
+    false_negatives: List[TrialExampleOut]
+    unsure_patterns: List[PatternBucketOut]
+
+
+@router.get("/trials/insights", response_model=InsightsResponse)
+async def get_insights(
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Accuracy insights focused on the AI classifier: the confident-trial error rate
+    (a guardrail for auto-publishing), how reviewers resolve unsure trials, false
+    negatives (AI-rejected but human-approved), and unsure patterns by trial segment.
+    """
+    insights = await accuracy.compute_insights(db)
+    return InsightsResponse.model_validate(insights)
+
+
+def _format_advice_cases(insights: accuracy.AccuracyInsights) -> str:
+    examples = (
+        insights.confident_false_positives
+        + insights.false_negatives
+        + insights.unsure_resolved
+    )
+    lines: list[str] = []
+    for ex in examples:
+        lines.append(
+            f"- Title: {ex.brief_title}\n"
+            f"  AI label: {ex.ai_relevance_label or 'unknown'}\n"
+            f"  AI reason: {ex.ai_relevance_reason or 'n/a'}\n"
+            f"  Human decision: {ex.human_decision}\n"
+            f"  Reviewer notes: {ex.reviewer_notes or 'n/a'}"
+        )
+    return "\n".join(lines)
+
+
+@router.post("/trials/insights/ai-advice", response_model=AccuracyAdvice)
+async def generate_ai_advice(
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Send classifier-vs-human disagreements to the LLM for improvement advice."""
+    insights = await accuracy.compute_insights(db)
+    cases = _format_advice_cases(insights)
+    if not cases:
+        return AccuracyAdvice(
+            summary="Not enough reviewer decisions yet to analyse. Approve or reject "
+            "more trials, then try again.",
+            patterns=[],
+            recommendations=[],
+        )
+
+    try:
+        client = AIClient()
+    except RuntimeError:
+        return AccuracyAdvice(
+            summary="AI analysis is unavailable: the AI API key is not configured.",
+            patterns=[],
+            recommendations=[],
+        )
+
+    active_version = await prompt_store.get_active_version(db)
+    user_prompt = ACCURACY_ADVICE_USER_PROMPT_TEMPLATE.format(
+        current_prompt=active_version.content,
+        cases=cases,
+    )
+    raw_advice = await client.analyze_accuracy(
+        system_prompt=ACCURACY_ADVICE_SYSTEM_PROMPT,
+        user_prompt=user_prompt,
+    )
+    merged_prompt = apply_prompt_edits(active_version.content, raw_advice.prompt_edits)
+    advice = AccuracyAdvice(
+        summary=raw_advice.summary,
+        patterns=raw_advice.patterns,
+        recommendations=raw_advice.recommendations,
+        prompt_edits=raw_advice.prompt_edits,
+        proposed_system_prompt=merged_prompt,
+    )
+
+    examples_used = (
+        len(insights.confident_false_positives)
+        + len(insights.false_negatives)
+        + len(insights.unsure_resolved)
+    )
+    db.add(
+        AccuracyAdviceRun(
+            ai_model=settings.AI_MODEL,
+            confident_approved=insights.confident_approved,
+            confident_rejected=insights.confident_rejected,
+            confident_error_rate=insights.confident_error_rate,
+            unsure_approved=insights.unsure_approved,
+            unsure_rejected=insights.unsure_rejected,
+            unsure_pending=insights.unsure_pending,
+            unsure_approval_rate=insights.unsure_approval_rate,
+            false_negative_count=insights.false_negative_count,
+            examples_used=examples_used,
+            summary=advice.summary,
+            patterns=json.dumps(advice.patterns),
+            recommendations=json.dumps(advice.recommendations),
+            proposed_prompt=advice.proposed_system_prompt or None,
+            prompt_version_id=active_version.id,
+        )
+    )
+    await db.commit()
+    return advice
+
+
+class AdviceRunOut(BaseModel):
+    id: int
+    created_at: datetime
+    ai_model: str
+    confident_approved: int
+    confident_rejected: int
+    confident_error_rate: Optional[float]
+    unsure_approved: int
+    unsure_rejected: int
+    unsure_pending: int
+    unsure_approval_rate: Optional[float]
+    false_negative_count: int
+    examples_used: int
+    summary: Optional[str]
+    patterns: List[str]
+    recommendations: List[str]
+    proposed_prompt: Optional[str] = None
+
+
+class AdviceHistoryResponse(BaseModel):
+    runs: List[AdviceRunOut]
+
+
+def _decode_json_list(raw: Optional[str]) -> List[str]:
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+        return value if isinstance(value, list) else []
+    except (ValueError, TypeError):
+        return []
+
+
+@router.get("/trials/insights/advice-history", response_model=AdviceHistoryResponse)
+async def get_advice_history(
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the last 20 saved AI accuracy-advice runs, newest first."""
+    stmt = (
+        select(AccuracyAdviceRun)
+        .order_by(AccuracyAdviceRun.created_at.desc(), AccuracyAdviceRun.id.desc())
+        .limit(20)
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    runs = [
+        AdviceRunOut(
+            id=row.id,
+            created_at=row.created_at,
+            ai_model=row.ai_model,
+            confident_approved=row.confident_approved,
+            confident_rejected=row.confident_rejected,
+            confident_error_rate=row.confident_error_rate,
+            unsure_approved=row.unsure_approved,
+            unsure_rejected=row.unsure_rejected,
+            unsure_pending=row.unsure_pending,
+            unsure_approval_rate=row.unsure_approval_rate,
+            false_negative_count=row.false_negative_count,
+            examples_used=row.examples_used,
+            summary=row.summary,
+            patterns=_decode_json_list(row.patterns),
+            recommendations=_decode_json_list(row.recommendations),
+            proposed_prompt=row.proposed_prompt,
+        )
+        for row in rows
+    ]
+    return AdviceHistoryResponse(runs=runs)
+
+
+# ── Classifier prompt versioning + backtesting ────────────────────────────────
+
+BACKTEST_DEFAULT_SAMPLE = 60
+BACKTEST_MAX_SAMPLE = 200
+BACKTEST_CONCURRENCY = 5
+
+
+class PromptVersionOut(BaseModel):
+    id: int
+    created_at: datetime
+    source: str
+    note: Optional[str]
+    is_active: bool
+    created_by: Optional[str]
+    content: str
+
+
+class ClassifierPromptResponse(BaseModel):
+    active: Optional[PromptVersionOut]
+    versions: List[PromptVersionOut]
+
+
+class SavePromptRequest(BaseModel):
+    content: str
+    note: Optional[str] = None
+    source: str = "manual"
+    advice_run_id: Optional[int] = None
+
+
+def _prompt_version_out(version) -> PromptVersionOut:
+    return PromptVersionOut(
+        id=version.id,
+        created_at=version.created_at,
+        source=version.source,
+        note=version.note,
+        is_active=version.is_active,
+        created_by=version.created_by,
+        content=version.content,
+    )
+
+
+@router.get("/trials/classifier-prompt", response_model=ClassifierPromptResponse)
+async def get_classifier_prompt(
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the active classifier prompt plus the full version history."""
+    active = await prompt_store.get_active_version(db)
+    versions = await prompt_store.list_versions(db)
+    return ClassifierPromptResponse(
+        active=_prompt_version_out(active),
+        versions=[_prompt_version_out(v) for v in versions],
+    )
+
+
+@router.post("/trials/classifier-prompt", response_model=PromptVersionOut)
+async def save_classifier_prompt(
+    body: SavePromptRequest,
+    user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create and activate a new classifier prompt version (the Apply path)."""
+    content = body.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Prompt content cannot be empty.")
+    created_by = user.get("email") or user.get("sub", "admin")
+    version = await prompt_store.create_version(
+        db,
+        content=content,
+        source=body.source or "manual",
+        note=body.note,
+        created_by=created_by,
+        advice_run_id=body.advice_run_id,
+        activate=True,
+    )
+    return _prompt_version_out(version)
+
+
+@router.post("/trials/classifier-prompt/{version_id}/activate", response_model=PromptVersionOut)
+async def activate_classifier_prompt(
+    version_id: int,
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Roll back to (activate) an existing prompt version."""
+    version = await prompt_store.activate_version(db, version_id)
+    if version is None:
+        raise HTTPException(status_code=404, detail="Prompt version not found.")
+    return _prompt_version_out(version)
+
+
+class BacktestRequest(BaseModel):
+    prompt: str
+    sample_size: Optional[int] = None
+
+
+class BacktestMetrics(BaseModel):
+    confident_error_rate: Optional[float]
+    unsure_rate: Optional[float]
+    false_negative_count: int
+    correct_auto_count: int
+
+
+class BacktestResponse(BaseModel):
+    sample_size: int
+    candidate: BacktestMetrics
+    baseline: BacktestMetrics
+
+
+def _classifier_input(row) -> dict:
+    """Reconstruct the classifier input dict from a stored trial row."""
+    return {
+        "nct_id": row.nct_id,
+        "brief_title": row.brief_title,
+        "brief_summary": row.brief_summary,
+        "study_type": row.study_type,
+        "phase": row.phase,
+        "overall_status": row.overall_status,
+        "eligibility_criteria": row.eligibility_criteria,
+        "intervention_description": row.intervention_description,
+    }
+
+
+def _backtest_metrics(items: list[tuple[Optional[str], bool]]) -> BacktestMetrics:
+    """Compute metrics from (label, human_keep) pairs.
+
+    human_keep is True when a reviewer approved the trial (relevant), False when
+    a reviewer rejected it (irrelevant).
+    """
+    confident_total = sum(1 for label, _ in items if label == "confident")
+    confident_wrong = sum(1 for label, keep in items if label == "confident" and not keep)
+    unsure = sum(1 for label, _ in items if label == "unsure")
+    false_neg = sum(1 for label, keep in items if label == "reject" and keep)
+    correct_auto = sum(
+        1
+        for label, keep in items
+        if (label == "confident" and keep) or (label == "reject" and not keep)
+    )
+    n = len(items)
+    return BacktestMetrics(
+        confident_error_rate=(confident_wrong / confident_total) if confident_total else None,
+        unsure_rate=(unsure / n) if n else None,
+        false_negative_count=false_neg,
+        correct_auto_count=correct_auto,
+    )
+
+
+@router.post("/trials/insights/backtest", response_model=BacktestResponse)
+async def backtest_prompt(
+    body: BacktestRequest,
+    _user: dict = Depends(clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-classify a sample of already-decided trials with a candidate prompt and
+    compare the resulting metrics against the current stored labels."""
+    candidate_prompt = body.prompt.strip()
+    if not candidate_prompt:
+        raise HTTPException(status_code=400, detail="Prompt cannot be empty.")
+
+    sample_size = body.sample_size or BACKTEST_DEFAULT_SAMPLE
+    sample_size = max(1, min(sample_size, BACKTEST_MAX_SAMPLE))
+
+    # Ground truth: approved clinical trials (keep) + human-rejected irrelevant
+    # trials (reject). AI-only rejections have no human verdict and are excluded.
+    approved_rows = (
+        await db.execute(
+            select(ClinicalTrial).where(ClinicalTrial.status == TrialStatus.APPROVED)
+        )
+    ).scalars().all()
+    rejected_rows = (
+        await db.execute(
+            select(IrrelevantTrial).where(IrrelevantTrial.rejected_by.isnot(None))
+        )
+    ).scalars().all()
+
+    decided = [(row, True) for row in approved_rows] + [(row, False) for row in rejected_rows]
+    if not decided:
+        raise HTTPException(
+            status_code=400,
+            detail="No human-decided trials available to backtest against.",
+        )
+
+    random.shuffle(decided)
+    decided = decided[:sample_size]
+
+    try:
+        client = AIClient()
+    except RuntimeError:
+        raise HTTPException(
+            status_code=503,
+            detail="AI analysis is unavailable: the AI API key is not configured.",
+        )
+
+    semaphore = asyncio.Semaphore(BACKTEST_CONCURRENCY)
+
+    async def _classify(row) -> str:
+        async with semaphore:
+            result = await classify_trial(client, _classifier_input(row), candidate_prompt)
+            return result.label.value
+
+    candidate_labels = await asyncio.gather(*[_classify(row) for row, _ in decided])
+
+    candidate_items = [
+        (label, keep) for label, (_, keep) in zip(candidate_labels, decided)
+    ]
+    baseline_items = [
+        (row.ai_relevance_label or "unsure", keep) for row, keep in decided
+    ]
+
+    candidate = _backtest_metrics(candidate_items)
+    baseline = _backtest_metrics(baseline_items)
+
+    active = await prompt_store.get_active_version(db)
+    db.add(
+        BacktestRun(
+            ai_model=settings.AI_MODEL,
+            prompt_version_id=active.id,
+            sample_size=len(decided),
+            confident_error_rate=candidate.confident_error_rate,
+            unsure_rate=candidate.unsure_rate,
+            false_negative_count=candidate.false_negative_count,
+            correct_auto_count=candidate.correct_auto_count,
+            baseline_confident_error_rate=baseline.confident_error_rate,
+            baseline_unsure_rate=baseline.unsure_rate,
+            baseline_false_negative_count=baseline.false_negative_count,
+            baseline_correct_auto_count=baseline.correct_auto_count,
+        )
+    )
+    await db.commit()
+
+    return BacktestResponse(
+        sample_size=len(decided),
+        candidate=candidate,
+        baseline=baseline,
+    )
+
+
 @router.get("/trials/review-queue", response_model=List[TrialListItem])
 async def get_review_queue(
     _user: dict = Depends(clerk_user),
@@ -588,6 +1165,10 @@ async def restore_irrelevant_trial(
     restored = ClinicalTrial(
         **{f: getattr(trial, f) for f in _BASE_FIELDS},
         status=TrialStatus.PENDING_REVIEW,
+        # Preserve the AI verdict so an AI-rejected trial that a human restores
+        # and later approves is detectable as a false negative.
+        ai_relevance_label=trial.ai_relevance_label,
+        ai_relevance_reason=trial.ai_relevance_reason,
     )
     db.add(restored)
     await db.delete(trial)

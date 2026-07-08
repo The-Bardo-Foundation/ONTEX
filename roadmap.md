@@ -39,6 +39,9 @@ Phases 1–3 complete; Phase 4 in progress. The ingestion pipeline is fully oper
 - **Admin dashboard** (protected, requires Clerk login):
   - Review Queue (`/admin`) — same sidebar queue + detail view as Phase 3
   - All Trials (`/admin/trials`) — all statuses visible, full status/event filters
+  - Statistics (`/admin/statistics`) — approved/rejected/pending counts plus an AI-vs-human correlation matrix and the AI-`confident` approval rate (backed by `GET /api/v1/trials/statistics`; see `docs/statistics.md`)
+  - Accuracy insights (under `/admin/statistics`) — confident-error-rate guardrail, unsure-bucket resolution stats and per-segment patterns, false-negative tracking (restore preserves the AI label), and on-demand LLM recommendations for improving the classifier prompt (backed by `GET /api/v1/trials/insights` and `POST /api/v1/trials/insights/ai-advice`; see `docs/insights.md`)
+  - Accuracy advice history — each AI-advice generation is logged to `accuracy_advice_runs` (migration 009) with a metric snapshot + advice, surfaced via `GET /api/v1/trials/insights/advice-history` so prompt changes can be correlated with rate drift over time
   - Ingestion progress modal — step-by-step progress bars via SSE, shows counts per step
 - `approved_by`/`rejected_by` pulled from Clerk `user.primaryEmailAddress` (was hardcoded to `"admin"`)
 - **AI auto-approval for confident classifications** (issue #59): the ingestion pipeline now sets `status=APPROVED` and `approved_by="ai"` for trials the AI is confident about, so they are published immediately without sitting in the review queue. Only `unsure` classifications still land in `PENDING_REVIEW`. Updated trials that drop from confident to unsure revert to `PENDING_REVIEW` so editors can re-check the changed content.

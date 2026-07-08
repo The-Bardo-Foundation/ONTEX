@@ -5,7 +5,7 @@ from openai import AsyncOpenAI
 
 from app.core.config import settings
 
-from .schemas import ClassificationResult, ConfidenceLabel
+from .schemas import AccuracyAdvice, ClassificationResult, ConfidenceLabel
 
 logger = logging.getLogger(__name__)
 
@@ -109,4 +109,47 @@ class AIClient:
         return ClassificationResult(
             label=ConfidenceLabel.UNSURE,
             reason="AI evaluation failed -- needs manual review",
+        )
+
+    async def analyze_accuracy(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        model: str | None = None,
+        temperature: float = 0.2,
+        max_retries: int = 2,
+    ) -> AccuracyAdvice:
+        """Analyse classifier-vs-human disagreements and return improvement advice.
+
+        Fail-safe: returns a valid but empty AccuracyAdvice on hard failure so the
+        UI never crashes.
+        """
+        last_error: Exception | None = None
+
+        for attempt in range(1 + max_retries):
+            try:
+                response = await self._client.chat.completions.create(
+                    model=model or self._model,
+                    temperature=temperature,
+                    response_format={"type": "json_object"},
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                )
+                raw = response.choices[0].message.content
+                return AccuracyAdvice(**json.loads(raw))
+            except Exception as e:
+                last_error = e
+                logger.warning(
+                    "analyze_accuracy attempt %d failed: %s", attempt + 1, e
+                )
+
+        logger.error(
+            "analyze_accuracy failed after %d attempts: %s", 1 + max_retries, last_error
+        )
+        return AccuracyAdvice(
+            summary="AI analysis failed — please try again later.",
+            patterns=[],
+            recommendations=[],
         )
