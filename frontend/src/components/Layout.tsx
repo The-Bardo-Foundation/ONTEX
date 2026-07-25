@@ -28,7 +28,11 @@ export function Layout({
       <div className="min-h-screen bg-gray-50 flex flex-col">
         <nav className="bg-white border-b px-6 py-3 flex items-center justify-between shrink-0">
           <Link to="/" className="flex items-center gap-2">
-            <img src="/bardo-logo.png" alt="Bardo" className="h-8 w-auto" />
+            <img
+              src="/osn-bardo-logo.png"
+              alt="Osteosarcoma Now — managed by Bardo Foundation"
+              className="h-10 w-auto"
+            />
           </Link>
           <div className="flex items-center gap-6">
             <NavLink
