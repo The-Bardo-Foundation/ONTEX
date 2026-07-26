@@ -176,7 +176,7 @@ export function IngestionDashboardModal({ onClose }: { onClose: () => void }) {
         {/* ── Live progress (when running) ─────────────────────────────────── */}
         {isRunning && status && (
           <div className="mb-5">
-            <p className="text-xs font-medium text-blue-600 uppercase tracking-wide mb-3">Running</p>
+            <p className="text-xs font-medium text-brand-600 uppercase tracking-wide mb-3">Running</p>
             <div className="space-y-4">
               {status.steps.map((step) => (
                 <StepRow key={step.id} step={step} />
@@ -228,10 +228,10 @@ export function IngestionDashboardModal({ onClose }: { onClose: () => void }) {
         {history && history.recent_runs.length > 0 && (
           <div className="mb-5">
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Recent runs</p>
-            <div className="overflow-x-auto rounded-lg border border-gray-100">
+            <div className="overflow-x-auto rounded-lg border border-line-soft">
               <table className="w-full text-xs text-gray-700">
                 <thead>
-                  <tr className="bg-gray-50 text-left">
+                  <tr className="bg-surface text-left">
                     <th className="px-3 py-2 font-medium text-gray-500">Date</th>
                     <th className="px-3 py-2 font-medium text-gray-500 text-right">Cand.</th>
                     <th className="px-3 py-2 font-medium text-gray-500 text-right">New</th>
@@ -240,9 +240,9 @@ export function IngestionDashboardModal({ onClose }: { onClose: () => void }) {
                     <th className="px-3 py-2 font-medium text-gray-500 text-right">Errors</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
+                <tbody className="divide-y divide-line-soft">
                   {history.recent_runs.map((run) => (
-                    <tr key={run.id} className="hover:bg-gray-50">
+                    <tr key={run.id} className="hover:bg-surface">
                       <td className="px-3 py-2 whitespace-nowrap">{formatDatetime(run.run_at)}</td>
                       <td className="px-3 py-2 text-right">{run.candidates_found.toLocaleString()}</td>
                       <td className="px-3 py-2 text-right">{run.new_trials}</td>
@@ -269,7 +269,7 @@ export function IngestionDashboardModal({ onClose }: { onClose: () => void }) {
             <button
               onClick={handleRunNow}
               disabled={starting}
-              className="flex-1 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              className="flex-1 px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 disabled:opacity-50 transition-colors"
             >
               {starting ? 'Starting…' : 'Run Now'}
             </button>
@@ -279,7 +279,7 @@ export function IngestionDashboardModal({ onClose }: { onClose: () => void }) {
               if (intervalRef.current !== null) clearInterval(intervalRef.current);
               onClose();
             }}
-            className="flex-1 px-4 py-2 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
+            className="flex-1 px-4 py-2 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-surface transition-colors"
           >
             {isRunning ? 'Close (runs in background)' : 'Close'}
           </button>
@@ -314,7 +314,7 @@ function StepRow({ step }: { step: StepDisplay }) {
         <div className="ml-6">
           <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
             <div
-              className="h-full bg-blue-500 rounded-full transition-all duration-300"
+              className="h-full bg-brand-500 rounded-full transition-all duration-300"
               style={{ width: `${pct}%` }}
             />
           </div>
@@ -336,7 +336,7 @@ function StateIcon({ state }: { state: StepState }) {
   if (state === 'active') {
     return (
       <span className="w-4 h-4 shrink-0">
-        <svg className="animate-spin text-blue-500" viewBox="0 0 24 24" fill="none">
+        <svg className="animate-spin text-brand-500" viewBox="0 0 24 24" fill="none">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
         </svg>

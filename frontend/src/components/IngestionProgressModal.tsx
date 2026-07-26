@@ -167,7 +167,7 @@ export function IngestionProgressModal({ onClose }: { onClose: () => void }) {
         {done && (
           <button
             onClick={onClose}
-            className="mt-5 w-full px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+            className="mt-5 w-full px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors"
           >
             Close
           </button>
@@ -180,7 +180,7 @@ export function IngestionProgressModal({ onClose }: { onClose: () => void }) {
               if (timeoutRef.current !== null) clearTimeout(timeoutRef.current);
               onClose();
             }}
-            className="mt-5 w-full px-4 py-2 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
+            className="mt-5 w-full px-4 py-2 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-surface transition-colors"
           >
             Cancel
           </button>
@@ -217,7 +217,7 @@ function StepRow({ step }: { step: StepDisplay }) {
         <div className="ml-6">
           <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
             <div
-              className="h-full bg-blue-500 rounded-full transition-all duration-300"
+              className="h-full bg-brand-500 rounded-full transition-all duration-300"
               style={{ width: `${pct}%` }}
             />
           </div>
@@ -241,7 +241,7 @@ function StateIcon({ state }: { state: StepState }) {
   if (state === 'active') {
     return (
       <span className="w-4 h-4 shrink-0">
-        <svg className="animate-spin text-blue-500" viewBox="0 0 24 24" fill="none">
+        <svg className="animate-spin text-brand-500" viewBox="0 0 24 24" fill="none">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
         </svg>

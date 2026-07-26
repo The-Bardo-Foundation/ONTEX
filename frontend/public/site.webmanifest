@@ -1,0 +1,13 @@
+{
+  "name": "Osteosarcoma Now — Clinical Trial Explorer",
+  "short_name": "OSN Trials",
+  "description": "A curated database of osteosarcoma clinical trials.",
+  "start_url": "/",
+  "display": "browser",
+  "theme_color": "#2563a8",
+  "background_color": "#fbfaf8",
+  "icons": [
+    { "src": "/icon-192.png", "type": "image/png", "sizes": "192x192" },
+    { "src": "/icon-512.png", "type": "image/png", "sizes": "512x512" }
+  ]
+}
