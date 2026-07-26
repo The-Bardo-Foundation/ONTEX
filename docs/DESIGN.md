@@ -57,7 +57,9 @@ That is the one intentional `blue-*` left in the codebase.
   heading in `gray-900`. No coloured heading text.
 - **Rules, not cards.** Separate content with hairlines (`border-line`) or a column
   divider. Avoid `rounded-xl` card grids — a page made of floating rounded boxes is
-  the main thing that reads as machine-generated.
+  the main thing that reads as machine-generated. The exception is a genuinely
+  repeating unit that has to read as discrete, like the worked classification
+  examples: `rounded border border-line bg-surface`, never more.
 - **Radius stays small.** `rounded` (4px) or none. `rounded-full` only on the timeline
   numerals.
 - **One accent per element.** Buttons are `bg-brand-600`; links are `brand-600` with a
@@ -117,22 +119,28 @@ All four sections are `mx-auto max-w-4xl px-6`; the sections alternate white and
 2. **Why this exists** — eyebrow, a single bold sentence, then three figures
    (`~1,000` / `Decades` / `300k+`) split by vertical hairlines, each with a
    one-sentence gloss. One colour each: `brand-600`, `accent-700`, `gray-900`.
-3. **How it works** — the five pipeline steps as a **static** vertical timeline.
+3. **How it works** — the five pipeline steps as a vertical timeline of
+   disclosures. Each step expands to explain what that stage actually does; step 2
+   expands into the three labels with descriptions plus three worked examples.
 4. **Closing CTA** — `Find a trial that fits` on a `surface` band.
 
-Two details worth knowing before editing:
+Details worth knowing before editing the timeline:
 
-- The timeline rail is an absolutely positioned `span` per step
+- The rail is an absolutely positioned `span` per step
   (`top-8 bottom-2 left-[13px]`), drawn behind the numeral circle and omitted on the
-  last step.
-- `EMPHASISED_STEP` (step 2, AI Classification) is the only step with a filled
-  numeral and the only one that renders the three classification chips. It is the
-  stage the page exists to explain; the emphasis is deliberate, not state.
+  last step. It sits on the `<li>`, not inside the header button, so it spans the
+  expanded detail too.
+- **Nothing is open on load** (`activeStep` starts `null`), and only one step is open
+  at a time. A filled numeral means open — it is state, not emphasis.
+- The chevron is the only thing signalling that a step opens, so it carries a resting
+  `brand-400` tint rather than appearing on hover. Do not make it hover-only.
+- Step 2 shows the three classification chips **while collapsed**, as shorthand for
+  what the pipeline produces. They are hidden when it opens, because the expanded
+  panel lists the same three labels with their descriptions.
 
-The timeline is presentational only — the steps do not expand. An earlier version
-made each step a disclosure containing detail prose, three worked classification
-examples, and a modal showing the verbatim classification prompt from
-[`app/services/ai/prompts.py`](../app/services/ai/prompts.py). That was removed in
-favour of the flat five-line summary. If the transparency content is ever wanted
-back, it needs the page copy **and** a fresh copy of the backend prompt — nothing
-syncs the two automatically.
+The full classification prompt is deliberately **not** on the page. An earlier version
+had a modal showing the verbatim text from
+[`app/services/ai/prompts.py`](../app/services/ai/prompts.py); it was dropped because
+a wall of model instructions is not what a patient-facing page is for. The worked
+examples carry the same transparency more legibly. If the modal is ever wanted back,
+it needs a fresh copy of the backend prompt — nothing syncs the two automatically.

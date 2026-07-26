@@ -26,15 +26,20 @@ export function Layout({
   if (variant === 'public') {
     return (
       <div className="min-h-screen bg-surface flex flex-col">
-        <nav className="bg-white border-b border-line px-6 py-3 flex items-center justify-between shrink-0">
+        {/*
+          The logo is 5.6:1, so at h-10 it plus both links needs ~465px. Below that
+          the row wraps instead of forcing the whole document wider than the
+          viewport, which used to push every page into horizontal scroll on a phone.
+        */}
+        <nav className="bg-white border-b border-line px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-3 shrink-0">
           <Link to="/" className="flex items-center gap-2">
             <img
               src="/osn-bardo-logo.png"
               alt="Osteosarcoma Now — managed by Bardo Foundation"
-              className="h-10 w-auto"
+              className="max-h-8 w-auto max-w-full sm:max-h-10"
             />
           </Link>
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-4 sm:gap-6">
             <NavLink
               to="/trials"
               className={({ isActive }) =>
