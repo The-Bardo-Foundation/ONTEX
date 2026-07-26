@@ -8,6 +8,17 @@ import { AllTrialsPage } from './pages/AllTrialsPage';
 import { TrialDetailPage } from './pages/TrialDetailPage';
 import { ReviewQueuePage } from './pages/ReviewQueuePage';
 import { setTokenProvider } from './api';
+import { useDocumentTitle } from './utils/useDocumentTitle';
+
+// Wrapped so the route can set its own tab title like every other route does.
+function SignInPage() {
+  useDocumentTitle('Sign in');
+  return (
+    <div className="flex items-center justify-center min-h-screen bg-surface">
+      <SignIn routing="path" path="/sign-in" fallbackRedirectUrl="/admin" />
+    </div>
+  );
+}
 
 function App() {
   const { getToken } = useAuth();
@@ -24,14 +35,7 @@ function App() {
       <Route path="/" element={<Layout variant="public"><LandingPage /></Layout>} />
       <Route path="/trials" element={<Layout variant="public"><AllTrialsPage /></Layout>} />
       <Route path="/trials/:nct_id" element={<Layout variant="public"><TrialDetailPage /></Layout>} />
-      <Route
-        path="/sign-in/*"
-        element={
-          <div className="flex items-center justify-center min-h-screen bg-surface">
-            <SignIn routing="path" path="/sign-in" fallbackRedirectUrl="/admin" />
-          </div>
-        }
-      />
+      <Route path="/sign-in/*" element={<SignInPage />} />
 
       {/* Admin routes (protected) */}
       <Route

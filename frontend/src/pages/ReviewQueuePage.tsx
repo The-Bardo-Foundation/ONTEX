@@ -3,6 +3,7 @@ import { approveTrial, getReviewQueue, getTrial, rejectTrial } from '../api';
 import { IngestionEventBadge } from '../components/IngestionEventBadge';
 import { TrialDetailView } from '../components/TrialDetailView';
 import type { CustomEdits, TrialDetail, TrialListItem } from '../types';
+import { useDocumentTitle } from '../utils/useDocumentTitle';
 
 const RECRUITING_NOW = ['RECRUITING'];
 const NOT_RECRUITING = ['NOT_YET_RECRUITING', 'ACTIVE_NOT_RECRUITING', 'ENROLLING_BY_INVITATION'];
@@ -12,6 +13,7 @@ type RecruitingFilter = '' | 'recruiting' | 'not_recruiting' | 'finished';
 type AiFilter = '' | 'confident' | 'unsure' | 'reject';
 
 export function ReviewQueuePage() {
+  useDocumentTitle('Review Queue');
 
   const [queue, setQueue] = useState<TrialListItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);

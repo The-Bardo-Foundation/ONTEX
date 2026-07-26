@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { useDocumentTitle } from '../utils/useDocumentTitle';
 
 /*
  * The three framing facts, shown as figures rather than prose. The colour is
@@ -18,17 +19,17 @@ const WHY_STATS = [
     ),
   },
   {
-    figure: 'Decades',
+    figure: 'Daily',
     figureColor: 'text-accent-700',
     body: (
       <>
-        since standard treatment last changed. Trials are often the only path to something
-        newer.
+        trials open, close, and change who they can enrol. Weeks-old information can mean
+        missing the one that fits.
       </>
     ),
   },
   {
-    figure: '300k+',
+    figure: '~600k',
     figureColor: 'text-gray-900',
     body: (
       <>
@@ -93,6 +94,8 @@ const PIPELINE_STEPS = [
 const EMPHASISED_STEP = 2;
 
 export function LandingPage() {
+  useDocumentTitle('Clinical Trial Explorer');
+
   return (
     <div className="bg-white">
       {/* ── Hero ── */}
@@ -135,8 +138,7 @@ export function LandingPage() {
             Why this exists
           </h2>
           <p className="mt-5 max-w-xl text-[1.75rem] font-bold leading-snug tracking-tight text-gray-900">
-            A rare cancer, treated the same way for decades — with trials nobody can keep up
-            with.
+            A rare cancer, with trials nobody can keep up with.
           </p>
 
           <dl className="mt-10 grid gap-8 sm:grid-cols-3 sm:gap-0">

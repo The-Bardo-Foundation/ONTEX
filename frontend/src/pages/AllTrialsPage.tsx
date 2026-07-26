@@ -7,6 +7,7 @@ import { IrrelevantTrialDetailModal } from '../components/IrrelevantTrialDetailM
 import { StatusBadge } from '../components/StatusBadge';
 import type { TrialListItem, TrialsListResponse } from '../types';
 import { formatLocationSummary, formatPhase, getOverallStatusDisplay } from '../utils/formatters';
+import { useDocumentTitle } from '../utils/useDocumentTitle';
 
 const PAGE_SIZE = 20;
 
@@ -195,6 +196,8 @@ function RadioOption({
 }
 
 export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
+  useDocumentTitle(adminMode ? 'All Trials' : 'Search Trials');
+
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<'relevant' | 'irrelevant'>('relevant');
   const [response, setResponse] = useState<TrialsListResponse | null>(null);

@@ -66,6 +66,45 @@ That is the one intentional `blue-*` left in the codebase.
 - **Muted chips.** The three classification labels are soft tints (`accent-50`,
   `brand-50`, `surface-muted`), not saturated pills.
 
+## Icons and document metadata
+
+[`frontend/index.html`](../frontend/index.html) carries the title, description,
+`theme-color`, icon links, and the Open Graph / Twitter tags.
+
+**The icon** is the Osteosarcoma Now chain mark — the blue glyph that replaces the
+`o` in the wordmark and doubles as the `O` in `NOW`. It was lifted out of
+`public/osn-bardo-logo.png` by flood-filling the connected blue component from the
+top ball, which isolates the mark cleanly from the green letters and the blue `N`
+and `W` around it. It is then centred, at its original blue, on a rounded square
+of the logo green `#b5ca41` (sampled from the same file — note this is lighter and
+yellower than the `accent` olive in the palette above, which comes from the brand
+spec rather than the logo).
+
+Generated files, all in `public/`:
+
+| File                   | Size(s)     | Purpose                                     |
+|------------------------|-------------|---------------------------------------------|
+| `favicon.ico`          | 16 / 32 / 48| Browsers request `/favicon.ico` unprompted   |
+| `apple-touch-icon.png` | 180         | iOS home screen — opaque, square corners (iOS masks it itself) |
+| `icon-192.png`         | 192         | Android / manifest                           |
+| `icon-512.png`         | 512         | Android / manifest                           |
+| `site.webmanifest`     | —           | Name, theme colour, icon list                |
+
+The small `.ico` frames use a slightly tighter corner radius so the square does not
+turn into a blob at 16px. There is no source script committed — the mark extraction
+is a one-off, and the files above are the artefacts.
+
+**`og:image` and `og:url` are relative**, which most scrapers will not resolve
+(Twitter/X rejects relative URLs outright). They need the deployed origin prefixed
+once the domain is settled; there is a comment in `index.html` saying so.
+
+**Tab titles** are per-route, via
+[`utils/useDocumentTitle.ts`](../frontend/src/utils/useDocumentTitle.ts), which
+appends `— Osteosarcoma Now`. Every route sets one; there is no restore-on-unmount,
+so a new route without a title call would silently inherit the previous one. The
+trial detail page passes `null` until its data arrives so the tab does not flash a
+placeholder, then uses the plain-language title in preference to the official one.
+
 ## Landing page structure
 
 [`frontend/src/pages/LandingPage.tsx`](../frontend/src/pages/LandingPage.tsx)

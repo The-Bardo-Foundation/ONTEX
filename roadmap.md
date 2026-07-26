@@ -45,6 +45,7 @@ Phases 1–3 complete; Phase 4 in progress. The ingestion pipeline is fully oper
 - **Public viewer (OSN-facing) layout refresh**: trial detail page keeps the contact details (name / phone / email) in the Key facts box, falls back to a "View on ClinicalTrials.gov" link when no contact exists, shows Interventions as a collapsible section, and ends with a static "What to do next" guidance block.
 - **AI label display rename**: admin-facing UI now shows `Match` / `Partial Match` / `Not Suitable` instead of the underlying `confident` / `unsure` / `reject` values. The database, prompt, and API contract still use the original enum strings — display-only change in `AiClassificationCard`, `ReviewQueuePage`, and `LandingPage`.
 - **Brand palette and landing page redesign**: a named palette (`brand` blue `#2563a8`, `accent` olive, warm `surface` / `line` neutrals) replaces Tailwind's default blue across the whole front end, admin included. The landing page is rebuilt around a stat row and a static five-step timeline. Conventions are written up in [`docs/DESIGN.md`](docs/DESIGN.md), including the fact that `tailwind.config.js` changes need a dev-server restart. Semantic recruitment-status badges in `utils/formatters.ts` deliberately keep the default green/yellow/red/blue ramps.
+- **Site identity and metadata**: real favicon/app icons derived from the Osteosarcoma Now chain mark (blue on the logo green), plus `apple-touch-icon`, `site.webmanifest`, description, `theme-color`, and Open Graph / Twitter tags in `frontend/index.html`. Tab titles are per-route via `utils/useDocumentTitle.ts` — the Vite placeholders (`<title>frontend</title>`, `vite.svg`) are gone.
 - 68 tests passing (API, ingestion pipeline, AI services, UPDATED-trial guardrail)
 - APScheduler running ingestion on configurable schedule (default 24 h)
 - Development environment (Docker/SQLite), Railway deployment, GitHub Actions CI
@@ -56,7 +57,7 @@ Phases 1–3 complete; Phase 4 in progress. The ingestion pipeline is fully oper
 - Phase 5: `config.yaml` for search terms and schedule management
 - Phase 6: Verify WordPress PHP template integration end-to-end
 - Design: the `accent-600` olive eyebrows sit at ~3:1 contrast on `surface`, below WCAG AA for small text. Darkening them to `accent-800` (`#607623`, 4.9:1) fixes it without changing the look much — a call for the brand owner, so left as specified for now.
-- Design: `frontend/index.html` still ships the Vite defaults (`<title>frontend</title>`, `vite.svg` favicon) — unrelated to the palette work but visible in the browser tab.
+- Design: `og:image` / `og:url` in `frontend/index.html` are relative paths and need the deployed origin prefixed before social previews will render.
 
 ---
 
