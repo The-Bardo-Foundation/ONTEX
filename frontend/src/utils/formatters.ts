@@ -99,6 +99,12 @@ export const STATUS_GROUPS: StatusGroup[] = [
       'SUSPENDED',
       'NO_LONGER_AVAILABLE',
       'APPROVED_FOR_MARKETING',
+      // CT.gov's glossary is explicit: a study is UNKNOWN when its last known
+      // status was recruiting/not yet recruiting/active-not-recruiting, it has
+      // passed its completion date, and nobody has verified it in 2 years —
+      // "Studies with an unknown status are considered closed studies."
+      // https://clinicaltrials.gov/study-basics/glossary
+      'UNKNOWN',
     ],
   },
 ];
