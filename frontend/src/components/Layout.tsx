@@ -27,23 +27,25 @@ export function Layout({
     return (
       <div className="min-h-screen bg-surface flex flex-col">
         {/*
-          The logo is 5.6:1, so at h-10 it plus both links needs ~465px. Below that
-          the row wraps instead of forcing the whole document wider than the
-          viewport, which used to push every page into horizontal scroll on a phone.
+          One row at every width. The links keep their intrinsic width (shrink-0,
+          no wrapping mid-label) and the logo absorbs whatever is left: it is
+          5.6:1 with height driven by max-height, so max-w-full plus min-w-0 on
+          its flex item lets it scale down instead of wrapping the row or forcing
+          the document wider than the viewport.
         */}
-        <nav className="bg-white border-b border-line px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-3 shrink-0">
-          <Link to="/" className="flex items-center gap-2">
+        <nav className="bg-white border-b border-line px-4 sm:px-6 py-3 flex items-center justify-between gap-x-3 sm:gap-x-4 shrink-0">
+          <Link to="/" className="flex items-center gap-2 min-w-0">
             <img
               src="/osn-bardo-logo.png"
               alt="Osteosarcoma Now — managed by Bardo Foundation"
-              className="max-h-8 w-auto max-w-full sm:max-h-10"
+              className="max-h-7 w-auto max-w-full sm:max-h-10"
             />
           </Link>
-          <div className="flex items-center gap-4 sm:gap-6">
+          <div className="flex items-center gap-3 shrink-0 sm:gap-6">
             <NavLink
               to="/trials"
               className={({ isActive }) =>
-                `text-sm font-medium ${isActive ? 'text-brand-600' : 'text-gray-600 hover:text-gray-900'}`
+                `text-xs sm:text-sm font-medium whitespace-nowrap ${isActive ? 'text-brand-600' : 'text-gray-600 hover:text-gray-900'}`
               }
             >
               Search Trials
@@ -51,13 +53,13 @@ export function Layout({
             {isSignedIn ? (
               <NavLink
                 to="/admin"
-                className="text-sm font-medium text-brand-600 hover:text-brand-700"
+                className="text-xs sm:text-sm font-medium whitespace-nowrap text-brand-600 hover:text-brand-700"
               >
                 Admin Dashboard
               </NavLink>
             ) : (
               <SignInButton mode="redirect" forceRedirectUrl="/admin">
-                <button className="text-sm font-medium text-brand-600 hover:text-brand-700">
+                <button type="button" className="text-xs sm:text-sm font-medium whitespace-nowrap text-brand-600 hover:text-brand-700">
                   Admin Login
                 </button>
               </SignInButton>
