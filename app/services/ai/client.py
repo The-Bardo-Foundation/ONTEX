@@ -108,8 +108,9 @@ class AIClient:
         logger.error(
             "classify_trial failed after %d attempts: %s", 1 + max_retries, last_error
         )
+        reason = f"AI evaluation failed: {last_error}"
         return ClassificationResult(
             label=ConfidenceLabel.UNSURE,
-            reason=f"AI evaluation failed: {last_error}",
+            reason=reason[:500],
             failed=True,
         )
