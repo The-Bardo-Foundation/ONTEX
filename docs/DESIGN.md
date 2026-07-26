@@ -67,6 +67,12 @@ That is the one intentional `blue-*` left in the codebase.
 - **No emoji as iconography**, and no text glyphs (`▾`, `→`) used as UI chrome.
 - **Muted chips.** The three classification labels are soft tints (`accent-50`,
   `brand-50`, `surface-muted`), not saturated pills.
+- **The public header stays on one row.** Logo left, nav links right, down to 320px.
+  The links hold their intrinsic width (`shrink-0`, `whitespace-nowrap`) and the logo
+  is the flexible element — `min-w-0` on its link plus `max-w-full` on the image lets
+  it scale below `max-h-7` when space runs out. Don't add `flex-wrap` back: a wrapped
+  header pushes the nav onto a second row on a phone, and letting the logo win instead
+  forces horizontal scroll on every page.
 
 ## Icons and document metadata
 
