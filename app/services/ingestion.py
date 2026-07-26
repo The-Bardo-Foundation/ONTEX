@@ -392,7 +392,9 @@ async def run_daily_ingestion(
             # refetched on the next run, rather than parked as a bogus "unsure".
             classification = ClassificationResult(
                 label=ConfidenceLabel.UNSURE,
-                reason=f"Classification error: {exc}",
+                # Truncated: reason has max_length=500, and a ValidationError
+                # raised here would abort the whole run.
+                reason=f"Classification error: {exc}"[:500],
                 failed=True,
             )
         classifications[nct_id] = classification
@@ -558,6 +560,7 @@ async def run_daily_ingestion(
         "irrelevant": newly_irrelevant,
         "fetch_errors": fetch_errors,
         "classify_errors": classify_errors,
+    })
 
     logger.info(
         "Ingestion complete: %d new, %d updated, %d skipped (unchanged), %d re-evaluated | "

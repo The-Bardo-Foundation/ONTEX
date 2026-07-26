@@ -131,6 +131,26 @@ This agent does NOT fetch data, write to DB, or generate summaries.
   run** — no row is written — so the trial is refetched and re-evaluated on the next
   daily run rather than parked with a verdict the AI never actually made.
 - A genuine `unsure`/`reject`/`confident` verdict always has `failed=False`.
+- `failed` is set by our code only. Never trust a `failed` field coming back from the
+  LLM's JSON — the client overrides it to `False` when parsing a successful response.
+
+### Why skipping is safe (this used to say "NEVER silently drop a trial")
+
+Dropping the trial for one run is not data loss, because **nothing is written**:
+
+- A **new** trial gets no row, so the next run still sees it as new.
+- An **updated** trial keeps its old `last_update_post_date`, so it still mismatches
+  CT.gov and Step 2's date diff flags it as updated again.
+- A **rejected** trial stays in `irrelevant_trials` with its old date, so re-evaluation
+  is triggered again.
+
+In every case the trial resurfaces on the next daily run and is re-classified then. The
+alternative — storing `unsure` — is worse: it puts a verdict the AI never made in front
+of the editorial team, and once the row exists with a current date, the date diff stops
+flagging it, so the AI never looks at that trial again.
+
+The cost is that a sustained LLM outage means a day (or more) of no ingestion. That is
+visible as `classify_errors` on the ingestion run record and in the admin dashboard.
 
 ---
 

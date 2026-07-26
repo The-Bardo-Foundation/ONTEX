@@ -984,10 +984,12 @@ async def test_ai_classification_failure_skips_new_trial(tmp_path, monkeypatch):
         "app.services.ingestion.ai_generate_summaries",
         AsyncMock(return_value=FAKE_AI_SUMMARIES),
     )
-    # Classification raises an unexpected exception
+    # Classification raises an unexpected exception. The message is deliberately
+    # longer than ClassificationResult.reason's max_length=500 — the handler must
+    # truncate it, not blow up with a ValidationError and abort the run.
     monkeypatch.setattr(
         "app.services.ingestion.classify_trial",
-        AsyncMock(side_effect=RuntimeError("OpenAI timeout")),
+        AsyncMock(side_effect=RuntimeError("OpenAI timeout " * 50)),
     )
 
     from app.services.ingestion import run_daily_ingestion

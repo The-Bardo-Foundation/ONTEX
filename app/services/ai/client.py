@@ -79,7 +79,11 @@ class AIClient:
         temperature: float = 0.1,
         max_retries: int = 2,
     ) -> ClassificationResult:
-        """Classify a trial via LLM. Returns a safe default on failure (never loses a trial)."""
+        """Classify a trial via LLM.
+
+        On failure after retries, returns a result with `failed=True` so the caller
+        can skip the trial rather than store a verdict the AI never made.
+        """
         last_error: Exception | None = None
 
         for attempt in range(1 + max_retries):
@@ -95,7 +99,8 @@ class AIClient:
                 )
                 raw = response.choices[0].message.content
                 data = json.loads(raw)
-                return ClassificationResult(**data)
+                # `failed` is ours, not the model's — never let the LLM set it.
+                return ClassificationResult(**{**data, "failed": False})
             except Exception as e:
                 last_error = e
                 logger.warning(
