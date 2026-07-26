@@ -59,7 +59,7 @@ export function Layout({
               </NavLink>
             ) : (
               <SignInButton mode="redirect" forceRedirectUrl="/admin">
-                <button className="text-xs sm:text-sm font-medium whitespace-nowrap text-brand-600 hover:text-brand-700">
+                <button type="button" className="text-xs sm:text-sm font-medium whitespace-nowrap text-brand-600 hover:text-brand-700">
                   Admin Login
                 </button>
               </SignInButton>
