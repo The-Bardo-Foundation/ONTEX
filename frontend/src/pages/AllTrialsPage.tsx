@@ -564,7 +564,7 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
               <FilterSection title="Recruiting Status">
                 <StatusFilter
                   statuses={facets.statuses}
-                  selected={params.overall_status?.split('|').filter(Boolean) ?? []}
+                  selected={params.overall_status?.split('|').map((s) => s.trim()).filter(Boolean) ?? []}
                   onChange={(next) =>
                     setParams((p) => ({ ...p, overall_status: next.join('|') || undefined, page: 1 }))
                   }
