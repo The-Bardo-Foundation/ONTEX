@@ -14,7 +14,7 @@ Covers:
 - Missing nct_id from map_api_to_model: trial skipped
 - Missing brief_title from API: map_api_to_model uses safe fallback
 - AI summarisation failure: custom_* fields remain None, trial still processed
-- AI classification failure: safe default (label=unsure, PENDING_REVIEW)
+- AI classification failure: trial skipped (no row written), refetched next run
 - Admin-edited custom_* fields preserved on re-ingestion
 """
 
@@ -956,9 +956,10 @@ async def test_ai_summarisation_failure_trial_still_processed(tmp_path, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_ai_classification_failure_defaults_to_unsure(tmp_path, monkeypatch):
-    """If classify_trial raises an exception, the trial should default to unsure
-    so no trial is silently lost."""
+async def test_ai_classification_failure_skips_new_trial(tmp_path, monkeypatch):
+    """If classify_trial raises (genuine AI failure), a new trial is written to
+    NEITHER table — it is skipped so the next daily run refetches and re-evaluates it
+    rather than parking it with a verdict the AI never made."""
     engine, factory = _make_test_db(tmp_path, "test9.db")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -983,20 +984,92 @@ async def test_ai_classification_failure_defaults_to_unsure(tmp_path, monkeypatc
         "app.services.ingestion.ai_generate_summaries",
         AsyncMock(return_value=FAKE_AI_SUMMARIES),
     )
-    # Classification raises an unexpected exception
+    # Classification raises an unexpected exception. The message is deliberately
+    # longer than ClassificationResult.reason's max_length=500 — the handler must
+    # truncate it, not blow up with a ValidationError and abort the run.
     monkeypatch.setattr(
         "app.services.ingestion.classify_trial",
-        AsyncMock(side_effect=RuntimeError("OpenAI timeout")),
+        AsyncMock(side_effect=RuntimeError("OpenAI timeout " * 50)),
     )
 
     from app.services.ingestion import run_daily_ingestion
     await run_daily_ingestion(search_terms=["osteosarcoma"])
 
     async with factory() as db:
-        trial = await db.get(ClinicalTrial, "NCT99999999")
+        assert await db.get(ClinicalTrial, "NCT99999999") is None
+        assert await db.get(IrrelevantTrial, "NCT99999999") is None
+        run = (await db.execute(select(IngestionRun))).scalars().one()
+        assert run.classify_errors == 1
+        assert run.relevant_processed == 0
+        assert run.irrelevant_processed == 0
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_ai_classification_failure_leaves_existing_approved_trial_untouched(
+    tmp_path, monkeypatch
+):
+    """When re-classification of an already-APPROVED trial fails, its existing row is
+    left exactly as it was (status, content, stored date) — so it still has a date
+    mismatch against CT.gov and gets refetched/re-evaluated on the next run."""
+    engine, factory = _make_test_db(tmp_path, "test9b.db")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with factory() as db:
+        db.add(ClinicalTrial(
+            nct_id="NCT90000000",
+            brief_title="Old Title",
+            last_update_post_date="2024-01-01",
+            status=TrialStatus.APPROVED,
+            approved_by=AI_APPROVER,
+            ai_relevance_label="confident",
+        ))
+        await db.commit()
+
+    # CT.gov reports a newer date → trial qualifies as "updated" and is re-fetched.
+    trial_dict = make_trial_dict(nct_id="NCT90000000", last_update="2024-09-01")
+
+    monkeypatch.setattr("app.services.ingestion.SessionLocal", factory)
+    monkeypatch.setattr(
+        "app.services.ingestion.iter_study_index_rows",
+        lambda **kwargs: [("NCT90000000", "2024-09-01")],
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.fetch_full_study",
+        lambda nct_id: {"protocolSection": {}},
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.map_api_to_model",
+        lambda raw: trial_dict.copy(),
+    )
+    monkeypatch.setattr("app.services.ingestion.AIClient", lambda: _make_mock_ai_client())
+    monkeypatch.setattr(
+        "app.services.ingestion.ai_generate_summaries",
+        AsyncMock(return_value=FAKE_AI_SUMMARIES),
+    )
+    # AIClient-level fail-safe path: returns a failed=True result rather than raising.
+    monkeypatch.setattr(
+        "app.services.ingestion.classify_trial",
+        AsyncMock(return_value=ClassificationResult(
+            label=ConfidenceLabel.UNSURE,
+            reason="AI evaluation failed: boom",
+            failed=True,
+        )),
+    )
+
+    from app.services.ingestion import run_daily_ingestion
+    await run_daily_ingestion(search_terms=["osteosarcoma"])
+
+    async with factory() as db:
+        trial = await db.get(ClinicalTrial, "NCT90000000")
         assert trial is not None
-        assert trial.status == TrialStatus.PENDING_REVIEW
-        assert trial.ai_relevance_label == "unsure"
+        # Untouched: old content and stored date preserved, still APPROVED.
+        assert trial.status == TrialStatus.APPROVED
+        assert trial.brief_title == "Old Title"
+        assert trial.last_update_post_date == "2024-01-01"
+        assert trial.ai_relevance_label == "confident"
 
     await engine.dispose()
 

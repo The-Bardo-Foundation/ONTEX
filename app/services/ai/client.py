@@ -79,7 +79,11 @@ class AIClient:
         temperature: float = 0.1,
         max_retries: int = 2,
     ) -> ClassificationResult:
-        """Classify a trial via LLM. Returns a safe default on failure (never loses a trial)."""
+        """Classify a trial via LLM.
+
+        On failure after retries, returns a result with `failed=True` so the caller
+        can skip the trial rather than store a verdict the AI never made.
+        """
         last_error: Exception | None = None
 
         for attempt in range(1 + max_retries):
@@ -95,18 +99,23 @@ class AIClient:
                 )
                 raw = response.choices[0].message.content
                 data = json.loads(raw)
-                return ClassificationResult(**data)
+                # `failed` is ours, not the model's — never let the LLM set it.
+                return ClassificationResult(**{**data, "failed": False})
             except Exception as e:
                 last_error = e
                 logger.warning(
                     "classify_trial attempt %d failed: %s", attempt + 1, e
                 )
 
-        # Never lose a trial — default to unsure so editorial team can review
+        # The AI call genuinely failed (outage/error). Flag it as failed so the
+        # ingestion pipeline skips this trial entirely and refetches it next run,
+        # rather than storing a bogus "unsure" verdict the AI never actually made.
         logger.error(
             "classify_trial failed after %d attempts: %s", 1 + max_retries, last_error
         )
+        reason = f"AI evaluation failed: {last_error}"
         return ClassificationResult(
             label=ConfidenceLabel.UNSURE,
-            reason="AI evaluation failed -- needs manual review",
+            reason=reason[:500],
+            failed=True,
         )
