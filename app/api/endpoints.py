@@ -411,7 +411,10 @@ async def get_trial_facets(
     country_stmt = select(country_field).where(country_field.isnot(None)).distinct()
     status_stmt = (
         select(ClinicalTrial.overall_status, func.count())
-        .where(ClinicalTrial.overall_status.isnot(None))
+        .where(
+            ClinicalTrial.overall_status.isnot(None),
+            ClinicalTrial.overall_status != "",
+        )
         .group_by(ClinicalTrial.overall_status)
     )
     if not is_authenticated:
