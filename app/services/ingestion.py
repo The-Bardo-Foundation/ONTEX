@@ -558,8 +558,6 @@ async def run_daily_ingestion(
         "irrelevant": newly_irrelevant,
         "fetch_errors": fetch_errors,
         "classify_errors": classify_errors,
-        "ai_failed_skipped": classify_errors,
-    })
 
     logger.info(
         "Ingestion complete: %d new, %d updated, %d skipped (unchanged), %d re-evaluated | "
