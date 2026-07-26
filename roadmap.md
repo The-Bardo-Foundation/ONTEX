@@ -46,7 +46,8 @@ Phases 1–3 complete; Phase 4 in progress. The ingestion pipeline is fully oper
 - **AI label display rename**: admin-facing UI now shows `Match` / `Partial Match` / `Not Suitable` instead of the underlying `confident` / `unsure` / `reject` values. The database, prompt, and API contract still use the original enum strings — display-only change in `AiClassificationCard`, `ReviewQueuePage`, and `LandingPage`.
 - **Brand palette and landing page redesign**: a named palette (`brand` blue `#2563a8`, `accent` olive, warm `surface` / `line` neutrals) replaces Tailwind's default blue across the whole front end, admin included. The landing page is rebuilt around a stat row and a static five-step timeline. Conventions are written up in [`docs/DESIGN.md`](docs/DESIGN.md), including the fact that `tailwind.config.js` changes need a dev-server restart. Semantic recruitment-status badges in `utils/formatters.ts` deliberately keep the default green/yellow/red/blue ramps.
 - **Site identity and metadata**: real favicon/app icons derived from the Osteosarcoma Now chain mark (blue on the logo green), plus `apple-touch-icon`, `site.webmanifest`, description, `theme-color`, and Open Graph / Twitter tags in `frontend/index.html`. Tab titles are per-route via `utils/useDocumentTitle.ts` — the Vite placeholders (`<title>frontend</title>`, `vite.svg`) are gone.
-- 68 tests passing (API, ingestion pipeline, AI services, UPDATED-trial guardrail)
+- **Recruitment status filtering rebuilt to be data-driven**: `GET /trials` now takes `overall_status=A|B` (pipe-separated raw CT.gov values, OR'd) instead of the three hardcoded `recruiting_status` buckets, and `GET /trials/facets` returns the statuses actually present with counts, auth-aware. Groupings survive as **presentation only** (`STATUS_GROUPS` in `formatters.ts`) — the public sidebar shows collapsible plain-English groups, admin dropdowns use `<optgroup>`. Fixes two real bugs: 104 of 848 trials (12%, mostly `UNKNOWN` plus expanded-access statuses) previously matched **no** filter option and were unreachable; and `NOT_YET_RECRUITING` trials were buried under a group labelled "Not currently recruiting", which read as closed and hid trials still worth a referral. See `docs/trial-status-filtering.md`.
+- 84 tests passing (API, ingestion pipeline, AI services, UPDATED-trial guardrail, status filtering + facets)
 - APScheduler running ingestion on configurable schedule (default 24 h)
 - Development environment (Docker/SQLite), Railway deployment, GitHub Actions CI
 
@@ -56,6 +57,7 @@ Phases 1–3 complete; Phase 4 in progress. The ingestion pipeline is fully oper
 - Phase 4: Role-based access (Admin vs. Reviewer) — can be stored as Clerk public metadata
 - Phase 5: `config.yaml` for search terms and schedule management
 - Phase 6: Verify WordPress PHP template integration end-to-end
+- Status filtering uses `overall_status` only, never `custom_overall_status`: an admin override changes the badge but not which filter the trial answers to (the countries facet does coalesce the two). See "Known gap" in `docs/trial-status-filtering.md`.
 - Design: the `accent-600` olive eyebrows sit at ~3:1 contrast on `surface`, below WCAG AA for small text. Darkening them to `accent-800` (`#607623`, 4.9:1) fixes it without changing the look much — a call for the brand owner, so left as specified for now.
 - Design: `og:image` / `og:url` in `frontend/index.html` are relative paths and need the deployed origin prefixed before social previews will render.
 

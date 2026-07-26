@@ -352,30 +352,73 @@ class PhpTrialResponse(BaseModel):
 # so FastAPI does not match the literal "review-queue" as a path parameter.
 # ──────────────────────────────────────────────────────────────────────────────
 
+class StatusFacet(BaseModel):
+    value: str
+    count: int
+
+
 class TrialFacets(BaseModel):
     countries: List[str]
+    statuses: List[StatusFacet]
+
+
+# Display order for recruitment-status filter options: statuses a patient can act
+# on first, then closed-to-enrolment, then stopped/finished. Not a grouping — every
+# status is its own filter option; this only decides the order they are listed in.
+# Any status absent from this list (e.g. one CT.gov adds later) is appended
+# alphabetically, so it always remains filterable.
+_STATUS_DISPLAY_ORDER = [
+    "RECRUITING",
+    "NOT_YET_RECRUITING",
+    "ENROLLING_BY_INVITATION",
+    "AVAILABLE",
+    "TEMPORARILY_NOT_AVAILABLE",
+    "ACTIVE_NOT_RECRUITING",
+    "APPROVED_FOR_MARKETING",
+    "NO_LONGER_AVAILABLE",
+    "SUSPENDED",
+    "COMPLETED",
+    "TERMINATED",
+    "WITHDRAWN",
+    "WITHHELD",
+    "UNKNOWN",
+]
+_STATUS_DISPLAY_ORDER_SET = set(_STATUS_DISPLAY_ORDER)
 
 
 @router.get("/trials/facets", response_model=TrialFacets)
-async def get_trial_facets(db: AsyncSession = Depends(get_db)):
+async def get_trial_facets(
+    clerk_user_claims: Optional[dict] = Depends(optional_clerk_user),
+    db: AsyncSession = Depends(get_db),
+):
     """
-    Return distinct filterable values from approved trials.
+    Return distinct filterable values from the trials the caller can see.
 
     - countries: sorted list of individual country names (split from comma-joined location_country)
+    - statuses: overall_status values actually present, with counts, in _STATUS_DISPLAY_ORDER
+
+    Visibility matches GET /trials: anonymous callers get facets over APPROVED
+    trials only, authenticated callers get facets over all trials. This keeps the
+    filter options and the results they produce in agreement — a status is only
+    offered as an option when at least one visible trial actually has it.
     """
+    is_authenticated = clerk_user_claims is not None
+
     country_field = func.coalesce(
         ClinicalTrial.custom_location_country,
         ClinicalTrial.location_country,
     )
-    stmt = (
-        select(country_field)
-        .where(
-            ClinicalTrial.status == TrialStatus.APPROVED,
-            country_field.isnot(None),
-        )
-        .distinct()
+    country_stmt = select(country_field).where(country_field.isnot(None)).distinct()
+    status_stmt = (
+        select(ClinicalTrial.overall_status, func.count())
+        .where(ClinicalTrial.overall_status.isnot(None))
+        .group_by(ClinicalTrial.overall_status)
     )
-    result = await db.execute(stmt)
+    if not is_authenticated:
+        country_stmt = country_stmt.where(ClinicalTrial.status == TrialStatus.APPROVED)
+        status_stmt = status_stmt.where(ClinicalTrial.status == TrialStatus.APPROVED)
+
+    result = await db.execute(country_stmt)
     raw_countries = [row[0] for row in result.fetchall()]
 
     # location_country may be comma-joined (e.g. "United States, Norway")
@@ -386,7 +429,19 @@ async def get_trial_facets(db: AsyncSession = Depends(get_db)):
             if country:
                 unique.add(country)
 
-    return TrialFacets(countries=sorted(unique))
+    result = await db.execute(status_stmt)
+    counts = {row[0]: row[1] for row in result.fetchall()}
+    statuses = [
+        StatusFacet(value=value, count=counts[value])
+        for value in _STATUS_DISPLAY_ORDER
+        if value in counts
+    ] + [
+        StatusFacet(value=value, count=counts[value])
+        for value in sorted(counts)
+        if value not in _STATUS_DISPLAY_ORDER_SET
+    ]
+
+    return TrialFacets(countries=sorted(unique), statuses=statuses)
 
 
 @router.get("/trials/review-queue", response_model=List[TrialListItem])
@@ -403,10 +458,6 @@ async def get_review_queue(
     result = await db.execute(stmt)
     return result.scalars().all()
 
-
-_RECRUITING_NOW = ["RECRUITING"]
-_NOT_RECRUITING = ["NOT_YET_RECRUITING", "ACTIVE_NOT_RECRUITING", "ENROLLING_BY_INVITATION"]
-_FINISHED = ["COMPLETED", "TERMINATED", "WITHDRAWN", "SUSPENDED"]
 
 # ── Age filtering helpers ──────────────────────────────────────────────────────
 # minimum_age / maximum_age are free-text strings from ClinicalTrials.gov,
@@ -450,7 +501,7 @@ async def get_trials(
     q: Optional[str] = None,
     ingestion_event: Optional[IngestionEvent] = None,
     phase: Optional[str] = None,
-    recruiting_status: Optional[str] = None,
+    overall_status: Optional[str] = None,
     country: Optional[str] = None,
     age_group: Optional[str] = None,
     sort_by: Optional[str] = None,
@@ -466,7 +517,8 @@ async def get_trials(
     - status: filter by PENDING_REVIEW / APPROVED / REJECTED
     - ingestion_event: filter by NEW / UPDATED
     - phase: substring match on phase field (e.g. "PHASE1" matches "PHASE1" and "PHASE1_PHASE2")
-    - recruiting_status: "recruiting" | "not_recruiting" | "finished"
+    - overall_status: pipe-separated CT.gov status values, OR'd together
+      (e.g. "RECRUITING|NOT_YET_RECRUITING"). Mirrors CT.gov's own filter syntax.
     - country: substring match on location_country (handles comma-joined multi-country values)
     - age_group: "child" | "adult" | "older_adult" — Python-side filter (age strings can't be compared in SQL)
     - sort_by: "last_update_post_date" (default, desc) or "brief_title" (asc)
@@ -484,12 +536,10 @@ async def get_trials(
         stmt = stmt.where(ClinicalTrial.ingestion_event == ingestion_event)
     if phase:
         stmt = stmt.where(ClinicalTrial.phase.ilike(f"%{phase}%"))
-    if recruiting_status == "recruiting":
-        stmt = stmt.where(ClinicalTrial.overall_status.in_(_RECRUITING_NOW))
-    elif recruiting_status == "not_recruiting":
-        stmt = stmt.where(ClinicalTrial.overall_status.in_(_NOT_RECRUITING))
-    elif recruiting_status == "finished":
-        stmt = stmt.where(ClinicalTrial.overall_status.in_(_FINISHED))
+    if overall_status:
+        wanted = [s.strip().upper() for s in overall_status.split("|") if s.strip()]
+        if wanted:
+            stmt = stmt.where(ClinicalTrial.overall_status.in_(wanted))
     if country:
         stmt = stmt.where(ClinicalTrial.location_country.ilike(f"%{country}%"))
     if q:
