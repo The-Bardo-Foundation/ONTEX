@@ -72,6 +72,17 @@ a status missing from every group still gets its own checkbox.
 - **Admin dropdowns** (All Trials, Review Queue) — native `<optgroup>`s, with an
   "All \<group\>" entry above each group's individual statuses.
 
+### Where `UNKNOWN` sits
+
+`UNKNOWN` is grouped under **Finished trials**, on CT.gov's own definition: a
+study gets that status when its last known state was recruiting, not yet
+recruiting, or active-not-recruiting, it has passed its completion date, and
+nobody has verified it in two years. Their glossary is explicit — *"Studies
+with an unknown status are considered closed studies."*
+
+This matters more than it sounds: `UNKNOWN` is 97 of the 848 trials in our
+search set, by far the largest status that no filter could previously reach.
+
 ## Why groups are presentation-only
 
 Patients and families do not know CT.gov vocabulary; "Enrolling by invitation"
