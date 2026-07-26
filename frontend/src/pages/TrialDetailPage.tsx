@@ -53,7 +53,7 @@ export function TrialDetailPage() {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-3">
         <p className="text-sm text-gray-500">Trial not found.</p>
-        <button onClick={() => navigate('/trials')} className="text-sm text-blue-600 hover:underline">
+        <button onClick={() => navigate('/trials')} className="text-sm text-brand-600 hover:underline">
           Back to All Trials
         </button>
       </div>

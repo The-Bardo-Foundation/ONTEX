@@ -104,7 +104,7 @@ export function ReviewQueuePage() {
             <select
               value={recruitingFilter}
               onChange={(e) => setRecruitingFilter(e.target.value as RecruitingFilter)}
-              className="w-full text-xs border border-gray-200 rounded px-2 py-1 text-gray-600 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400"
+              className="w-full text-xs border border-line rounded px-2 py-1 text-gray-600 bg-white focus:outline-none focus:ring-1 focus:ring-brand-400"
             >
               <option value="">All recruiting statuses</option>
               <option value="recruiting">Recruiting</option>
@@ -114,7 +114,7 @@ export function ReviewQueuePage() {
             <select
               value={aiFilter}
               onChange={(e) => setAiFilter(e.target.value as AiFilter)}
-              className="w-full text-xs border border-gray-200 rounded px-2 py-1 text-gray-600 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400"
+              className="w-full text-xs border border-line rounded px-2 py-1 text-gray-600 bg-white focus:outline-none focus:ring-1 focus:ring-brand-400"
             >
               <option value="">All AI confidence levels</option>
               <option value="confident">Match</option>
@@ -133,8 +133,8 @@ export function ReviewQueuePage() {
               <button
                 key={trial.nct_id}
                 onClick={() => setSelectedId(trial.nct_id)}
-                className={`w-full text-left px-4 py-3 border-b hover:bg-gray-50 transition-colors ${
-                  selectedId === trial.nct_id ? 'bg-blue-50 border-l-2 border-l-blue-500' : ''
+                className={`w-full text-left px-4 py-3 border-b hover:bg-surface transition-colors ${
+                  selectedId === trial.nct_id ? 'bg-brand-50 border-l-2 border-l-brand-500' : ''
                 }`}
               >
                 <div className="flex items-start justify-between gap-2">

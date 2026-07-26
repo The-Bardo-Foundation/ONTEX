@@ -57,7 +57,7 @@ const ADMIN_RECRUITING_OPTIONS = [
   ...RECRUITING_STATUS_OPTIONS,
 ];
 
-const SELECT_CLS = 'border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-700 bg-white shadow-sm cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition-colors hover:border-gray-300';
+const SELECT_CLS = 'border border-line rounded-lg px-3 py-1.5 text-sm text-gray-700 bg-white shadow-sm cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition-colors hover:border-gray-300';
 
 interface AllTrialsPageProps {
   /** Admin mode: shows all statuses and status filter. Default (public mode): APPROVED only. */
@@ -101,7 +101,7 @@ function CountryCombobox({
   return (
     <div ref={containerRef} className="relative">
       <div
-        className={`flex items-center gap-1.5 border rounded-lg px-3 py-2 bg-white cursor-text shadow-sm transition-colors ${open ? 'border-blue-400 ring-2 ring-blue-100' : 'border-gray-200 hover:border-gray-300'}`}
+        className={`flex items-center gap-1.5 border rounded-lg px-3 py-2 bg-white cursor-text shadow-sm transition-colors ${open ? 'border-brand-400 ring-2 ring-brand-100' : 'border-line hover:border-gray-300'}`}
         onClick={() => setOpen(true)}
       >
         {/* search icon */}
@@ -129,11 +129,11 @@ function CountryCombobox({
         )}
       </div>
       {open && (
-        <ul className="absolute z-10 left-0 right-0 mt-1.5 max-h-52 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg text-sm py-1">
+        <ul className="absolute z-10 left-0 right-0 mt-1.5 max-h-52 overflow-y-auto bg-white border border-line rounded-lg shadow-lg text-sm py-1">
           <li
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => select(undefined)}
-            className="px-3 py-2 cursor-pointer hover:bg-gray-50 text-gray-400 border-b border-gray-100 mb-1"
+            className="px-3 py-2 cursor-pointer hover:bg-surface text-gray-400 border-b border-line-soft mb-1"
           >
             All countries
           </li>
@@ -145,7 +145,7 @@ function CountryCombobox({
                 key={c}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => select(c)}
-                className={`px-3 py-2 cursor-pointer transition-colors ${c === value ? 'font-medium text-blue-600 bg-blue-50' : 'text-gray-700 hover:bg-gray-50'}`}
+                className={`px-3 py-2 cursor-pointer transition-colors ${c === value ? 'font-medium text-brand-600 bg-brand-50' : 'text-gray-700 hover:bg-surface'}`}
               >
                 {c}
               </li>
@@ -187,7 +187,7 @@ function RadioOption({
         value={value}
         checked={checked}
         onChange={() => onChange(value)}
-        className="accent-blue-600"
+        className="accent-brand-600"
       />
       {label}
     </label>
@@ -281,16 +281,16 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
             {adminMode ? 'All Trials' : 'Clinical Trials'}
           </h1>
           {adminMode && (
-            <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm">
+            <div className="flex rounded-lg border border-line overflow-hidden text-sm">
               <button
                 onClick={() => switchTab('relevant')}
-                className={`px-3 py-1 transition-colors ${activeTab === 'relevant' ? 'bg-blue-600 text-white font-medium' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                className={`px-3 py-1 transition-colors ${activeTab === 'relevant' ? 'bg-brand-600 text-white font-medium' : 'bg-white text-gray-600 hover:bg-surface'}`}
               >
                 Relevant
               </button>
               <button
                 onClick={() => switchTab('irrelevant')}
-                className={`px-3 py-1 border-l border-gray-200 transition-colors ${activeTab === 'irrelevant' ? 'bg-blue-600 text-white font-medium' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                className={`px-3 py-1 border-l border-line transition-colors ${activeTab === 'irrelevant' ? 'bg-brand-600 text-white font-medium' : 'bg-white text-gray-600 hover:bg-surface'}`}
               >
                 Irrelevant
               </button>
@@ -302,7 +302,7 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
           placeholder="Search by title or summary…"
           value={searchInput}
           onChange={(e) => handleSearchChange(e.target.value)}
-          className="w-full border border-gray-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+          className="w-full border border-gray-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
         />
         <div className="flex items-center gap-3 flex-wrap">
           {adminMode && activeTab === 'relevant' && (
@@ -372,7 +372,7 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
       <div className={`flex flex-1 overflow-hidden ${!adminMode ? 'flex-row' : 'flex-col'}`}>
         {/* Filter sidebar — public mode only */}
         {!adminMode && (
-          <aside className="w-52 shrink-0 border-r bg-gray-50 overflow-y-auto p-4 space-y-5">
+          <aside className="w-52 shrink-0 border-r bg-surface overflow-y-auto p-4 space-y-5">
             {facets && facets.countries.length > 0 && (
               <FilterSection title="Country">
                 <CountryCombobox
@@ -383,7 +383,7 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
               </FilterSection>
             )}
 
-            <div className="border-t border-gray-200" />
+            <div className="border-t border-line" />
 
             <FilterSection title="Age">
               <div className="space-y-1">
@@ -407,7 +407,7 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
               </div>
             </FilterSection>
 
-            <div className="border-t border-gray-200" />
+            <div className="border-t border-line" />
 
             <FilterSection title="Recruiting Status">
               <div className="space-y-1">
@@ -431,7 +431,7 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
               </div>
             </FilterSection>
 
-            <div className="border-t border-gray-200" />
+            <div className="border-t border-line" />
 
             <FilterSection title="Trial Phase">
               <div className="space-y-1">
@@ -457,10 +457,10 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
 
             {(params.phase || params.recruiting_status || params.age_group || params.country) && (
               <>
-                <div className="border-t border-gray-200" />
+                <div className="border-t border-line" />
                 <button
                   onClick={() => setParams((p) => ({ ...p, phase: undefined, recruiting_status: undefined, age_group: undefined, country: undefined, page: 1 }))}
-                  className="text-xs font-medium text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-full transition-colors"
+                  className="text-xs font-medium text-brand-600 hover:text-brand-700 bg-brand-50 hover:bg-brand-100 px-2.5 py-1 rounded-full transition-colors"
                 >
                   Clear filters
                 </button>
@@ -481,7 +481,7 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
                 <p className="text-sm text-gray-400">No irrelevant trials found.</p>
               </div>
             ) : (
-              <ul className="divide-y divide-gray-100">
+              <ul className="divide-y divide-line-soft">
                 {irrelevantResponse.items.map((trial: IrrelevantTrialListItem) => {
                   const statusDisplay = getOverallStatusDisplay(trial.overall_status);
                   return (
@@ -496,7 +496,7 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
                           setSelectedIrrelevantId(trial.nct_id);
                         }
                       }}
-                      className="px-6 py-4 hover:bg-gray-50 cursor-pointer transition-colors"
+                      className="px-6 py-4 hover:bg-surface cursor-pointer transition-colors"
                     >
                       <p className="text-sm font-semibold text-gray-900 leading-snug mb-1">
                         {trial.brief_title}
@@ -536,7 +536,7 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
               <p className="text-sm text-gray-400">No trials found.</p>
             </div>
           ) : (
-            <ul className="divide-y divide-gray-100">
+            <ul className="divide-y divide-line-soft">
               {response.items.map((trial: TrialListItem) => {
                 const statusDisplay = getOverallStatusDisplay(trial.overall_status);
                 const summary = trial.custom_brief_summary || trial.brief_summary;
@@ -547,7 +547,7 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
                   <li
                     key={trial.nct_id}
                     onClick={() => navigate(`/trials/${trial.nct_id}`)}
-                    className="px-6 py-4 hover:bg-gray-50 cursor-pointer transition-colors"
+                    className="px-6 py-4 hover:bg-surface cursor-pointer transition-colors"
                   >
                     <p className="text-sm font-semibold text-gray-900 leading-snug mb-1">
                       {trial.brief_title}
@@ -598,7 +598,7 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
                 setParams((p) => ({ ...p, page: (p.page ?? 1) - 1 }));
               }
             }}
-            className="px-4 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg shadow-sm hover:bg-gray-50 hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="px-4 py-1.5 text-sm font-medium text-gray-700 bg-white border border-line rounded-lg shadow-sm hover:bg-surface hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             Previous
           </button>
@@ -614,7 +614,7 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
                 setParams((p) => ({ ...p, page: (p.page ?? 1) + 1 }));
               }
             }}
-            className="px-4 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg shadow-sm hover:bg-gray-50 hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="px-4 py-1.5 text-sm font-medium text-gray-700 bg-white border border-line rounded-lg shadow-sm hover:bg-surface hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             Next
           </button>

@@ -19,14 +19,14 @@ export function Layout({
 
   const adminNavLinkClass = ({ isActive }: { isActive: boolean }) =>
     `block px-3 py-2 rounded-md text-sm font-medium ${
-      isActive ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:bg-gray-100'
+      isActive ? 'bg-brand-50 text-brand-700' : 'text-gray-600 hover:bg-gray-100'
     }`;
 
   // ── Public layout ───────────────────────────────────────────────────────────
   if (variant === 'public') {
     return (
-      <div className="min-h-screen bg-gray-50 flex flex-col">
-        <nav className="bg-white border-b px-6 py-3 flex items-center justify-between shrink-0">
+      <div className="min-h-screen bg-surface flex flex-col">
+        <nav className="bg-white border-b border-line px-6 py-3 flex items-center justify-between shrink-0">
           <Link to="/" className="flex items-center gap-2">
             <img
               src="/osn-bardo-logo.png"
@@ -38,7 +38,7 @@ export function Layout({
             <NavLink
               to="/trials"
               className={({ isActive }) =>
-                `text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-600 hover:text-gray-900'}`
+                `text-sm font-medium ${isActive ? 'text-brand-600' : 'text-gray-600 hover:text-gray-900'}`
               }
             >
               Search Trials
@@ -46,13 +46,13 @@ export function Layout({
             {isSignedIn ? (
               <NavLink
                 to="/admin"
-                className="text-sm font-medium text-blue-600 hover:text-blue-700"
+                className="text-sm font-medium text-brand-600 hover:text-brand-700"
               >
                 Admin Dashboard
               </NavLink>
             ) : (
               <SignInButton mode="redirect" forceRedirectUrl="/admin">
-                <button className="text-sm font-medium text-blue-600 hover:text-blue-700">
+                <button className="text-sm font-medium text-brand-600 hover:text-brand-700">
                   Admin Login
                 </button>
               </SignInButton>
@@ -67,7 +67,7 @@ export function Layout({
 
   // ── Admin layout ────────────────────────────────────────────────────────────
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex h-screen bg-surface">
       <nav className="w-52 shrink-0 bg-white border-r flex flex-col">
         <div className="px-4 py-3 border-b flex items-center justify-between">
           <Link to="/">
@@ -89,7 +89,7 @@ export function Layout({
         <div className="px-3 py-4 border-t">
           <button
             onClick={() => setShowIngestion(true)}
-            className="w-full px-3 py-2 text-xs font-medium rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+            className="w-full px-3 py-2 text-xs font-medium rounded border border-gray-300 text-gray-600 hover:bg-surface"
           >
             Ingestion
           </button>

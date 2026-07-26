@@ -33,7 +33,7 @@ Phases 1–3 complete; Phase 4 in progress. The ingestion pipeline is fully oper
   - `UserButton` in admin sidebar, `SignInButton` in public nav
   - Backend JWT middleware (`app/api/middleware.py`) verifies Clerk JWTs on protected endpoints (skipped in local/test environment)
 - **Public-facing viewer** (no login required):
-  - Landing page (`/`) — Bardo + Osteosarcoma logos, description, "Search Trials" CTA
+  - Landing page (`/`) — combined OSN/Bardo logo, hero, a three-figure "Why this exists" stat row, a static five-step pipeline timeline, and a closing CTA
   - Trials search page (`/trials`) — APPROVED trials only, searchable, read-only
   - Trial detail page (`/trials/:nct_id`) — read-only; shows approve/reject controls only when signed in
 - **Admin dashboard** (protected, requires Clerk login):
@@ -44,6 +44,7 @@ Phases 1–3 complete; Phase 4 in progress. The ingestion pipeline is fully oper
 - **AI auto-approval for confident classifications** (issue #59): the ingestion pipeline now sets `status=APPROVED` and `approved_by="ai"` for trials the AI is confident about, so they are published immediately without sitting in the review queue. Only `unsure` classifications still land in `PENDING_REVIEW`. Updated trials that drop from confident to unsure revert to `PENDING_REVIEW` so editors can re-check the changed content.
 - **Public viewer (OSN-facing) layout refresh**: trial detail page keeps the contact details (name / phone / email) in the Key facts box, falls back to a "View on ClinicalTrials.gov" link when no contact exists, shows Interventions as a collapsible section, and ends with a static "What to do next" guidance block.
 - **AI label display rename**: admin-facing UI now shows `Match` / `Partial Match` / `Not Suitable` instead of the underlying `confident` / `unsure` / `reject` values. The database, prompt, and API contract still use the original enum strings — display-only change in `AiClassificationCard`, `ReviewQueuePage`, and `LandingPage`.
+- **Brand palette and landing page redesign**: a named palette (`brand` blue `#2563a8`, `accent` olive, warm `surface` / `line` neutrals) replaces Tailwind's default blue across the whole front end, admin included. The landing page is rebuilt around a stat row and a static five-step timeline. Conventions are written up in [`docs/DESIGN.md`](docs/DESIGN.md), including the fact that `tailwind.config.js` changes need a dev-server restart. Semantic recruitment-status badges in `utils/formatters.ts` deliberately keep the default green/yellow/red/blue ramps.
 - 68 tests passing (API, ingestion pipeline, AI services, UPDATED-trial guardrail)
 - APScheduler running ingestion on configurable schedule (default 24 h)
 - Development environment (Docker/SQLite), Railway deployment, GitHub Actions CI
@@ -54,6 +55,8 @@ Phases 1–3 complete; Phase 4 in progress. The ingestion pipeline is fully oper
 - Phase 4: Role-based access (Admin vs. Reviewer) — can be stored as Clerk public metadata
 - Phase 5: `config.yaml` for search terms and schedule management
 - Phase 6: Verify WordPress PHP template integration end-to-end
+- Design: the `accent-600` olive eyebrows sit at ~3:1 contrast on `surface`, below WCAG AA for small text. Darkening them to `accent-800` (`#607623`, 4.9:1) fixes it without changing the look much — a call for the brand owner, so left as specified for now.
+- Design: `frontend/index.html` still ships the Vite defaults (`<title>frontend</title>`, `vite.svg` favicon) — unrelated to the palette work but visible in the browser tab.
 
 ---
 
