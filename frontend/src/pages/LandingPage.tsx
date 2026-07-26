@@ -420,14 +420,12 @@ export function LandingPage() {
       {/* ── Hero ── */}
       <section className="bg-white border-b border-gray-100">
         <div className="max-w-3xl mx-auto px-6 py-20 text-center">
-          <div className="flex items-center justify-center gap-8 mb-10">
+          <div className="flex items-center justify-center mb-10">
             <img
               src="/osn-bardo-logo.png"
               alt="Osteosarcoma Now — managed by Bardo Foundation"
               className="h-16 w-auto"
             />
-            <div className="w-px h-12 bg-gray-200" />
-            <img src="/osteosarcoma-logo.png" alt="ONTEX" className="h-16 w-auto" />
           </div>
           <h1 className="text-4xl font-bold text-gray-900 tracking-tight mb-4">
             Osteosarcoma Clinical Trial Explorer
