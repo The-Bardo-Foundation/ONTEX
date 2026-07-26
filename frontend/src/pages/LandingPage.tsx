@@ -101,10 +101,15 @@ export function LandingPage() {
       {/* ── Hero ── */}
       <section className="border-b border-line">
         <div className="mx-auto max-w-4xl px-6 py-16 text-center sm:py-20">
+          {/*
+            max-h rather than a fixed h: the logo is 5.6:1, so at this size it is
+            wider than a phone screen. Both constraints being maxima lets the width
+            bind on narrow viewports without squashing the aspect ratio.
+          */}
           <img
             src="/osn-bardo-logo.png"
             alt="Osteosarcoma Now — managed by Bardo Foundation"
-            className="mx-auto h-14 w-auto"
+            className="mx-auto max-h-20 max-w-full"
           />
           <h1 className="mt-10 text-4xl font-bold leading-[1.15] tracking-tight text-gray-900">
             Osteosarcoma Clinical Trial Explorer
