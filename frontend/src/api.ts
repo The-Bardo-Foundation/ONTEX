@@ -40,7 +40,8 @@ export interface GetTrialsParams {
   q?: string;
   ingestion_event?: string;
   phase?: string;
-  recruiting_status?: string;
+  /** Pipe-separated CT.gov status values, OR'd (e.g. "RECRUITING|NOT_YET_RECRUITING"). */
+  overall_status?: string;
   country?: string;
   age_group?: string;
   sort_by?: string;
@@ -48,8 +49,15 @@ export interface GetTrialsParams {
   page_size?: number;
 }
 
+export interface StatusFacet {
+  value: string;
+  count: number;
+}
+
 export interface TrialFacets {
   countries: string[];
+  /** overall_status values present in the visible trials, in display order. */
+  statuses: StatusFacet[];
 }
 
 export const getReviewQueue = async (): Promise<TrialListItem[]> => {

@@ -31,6 +31,13 @@ const OVERALL_STATUS_MAP: Record<string, StatusDisplay> = {
   TERMINATED:                  { label: 'Terminated',                className: 'bg-red-100 text-red-800' },
   WITHDRAWN:                   { label: 'Withdrawn',                 className: 'bg-red-100 text-red-800' },
   UNKNOWN:                     { label: 'Unknown',                   className: 'bg-gray-100 text-gray-500' },
+  // Expanded-access statuses. Rarer than the interventional ones above, but they
+  // do occur in our search set and AGENT.md lists expanded access as eligible.
+  AVAILABLE:                   { label: 'Available',                 className: 'bg-green-100 text-green-800' },
+  TEMPORARILY_NOT_AVAILABLE:   { label: 'Temporarily not available',  className: 'bg-yellow-100 text-yellow-800' },
+  NO_LONGER_AVAILABLE:         { label: 'No longer available',        className: 'bg-gray-100 text-gray-600' },
+  APPROVED_FOR_MARKETING:      { label: 'Approved for marketing',     className: 'bg-gray-100 text-gray-600' },
+  WITHHELD:                    { label: 'Withheld',                   className: 'bg-gray-100 text-gray-500' },
 };
 
 /**
@@ -42,6 +49,79 @@ export function getOverallStatusDisplay(status: string | null | undefined): Stat
     label: status.replace(/_/g, ' ').toLowerCase().replace(/^\w/, (c) => c.toUpperCase()),
     className: 'bg-gray-100 text-gray-600',
   };
+}
+
+export interface StatusGroup {
+  /** Stable key for React lists and expand/collapse state. */
+  key: string;
+  label: string;
+  statuses: string[];
+}
+
+/**
+ * Plain-English groupings of ClinicalTrials.gov statuses, used to organise the
+ * recruiting-status filter into a two-level list.
+ *
+ * These are PRESENTATION ONLY. The API filters on individual `overall_status`
+ * values (see GET /trials?overall_status=A|B), so a group is just a preset that
+ * ticks its member statuses. Nothing is stored grouped, and a status missing
+ * from every group here still gets its own filter option — see
+ * groupStatuses(), which returns leftovers as `ungrouped`.
+ *
+ * Note the middle label: it deliberately names BOTH ends of the group. The
+ * previous wording, "Not currently recruiting", read as "closed" and hid the
+ * fact that not-yet-recruiting trials — which are still worth a referral —
+ * were inside it.
+ */
+export const STATUS_GROUPS: StatusGroup[] = [
+  {
+    key: 'recruiting',
+    label: 'Recruiting now',
+    statuses: ['RECRUITING', 'AVAILABLE'],
+  },
+  {
+    key: 'not_recruiting',
+    label: 'Not recruiting yet or no longer recruiting',
+    statuses: [
+      'NOT_YET_RECRUITING',
+      'ENROLLING_BY_INVITATION',
+      'ACTIVE_NOT_RECRUITING',
+      'TEMPORARILY_NOT_AVAILABLE',
+    ],
+  },
+  {
+    key: 'finished',
+    label: 'Finished trials',
+    statuses: [
+      'COMPLETED',
+      'TERMINATED',
+      'WITHDRAWN',
+      'SUSPENDED',
+      'NO_LONGER_AVAILABLE',
+      'APPROVED_FOR_MARKETING',
+    ],
+  },
+];
+
+/**
+ * Distributes the statuses actually present in the database across STATUS_GROUPS,
+ * dropping group members nothing has and collecting anything unrecognised.
+ *
+ * Callers render `groups` as parent/child options and `ungrouped` as standalone
+ * ones, which guarantees every status in `available` stays reachable — including
+ * values CT.gov may add after this code was written.
+ */
+export function groupStatuses(available: string[]): {
+  groups: StatusGroup[];
+  ungrouped: string[];
+} {
+  const present = new Set(available);
+  const groups = STATUS_GROUPS
+    .map((g) => ({ ...g, statuses: g.statuses.filter((s) => present.has(s)) }))
+    .filter((g) => g.statuses.length > 0);
+
+  const claimed = new Set(STATUS_GROUPS.flatMap((g) => g.statuses));
+  return { groups, ungrouped: available.filter((s) => !claimed.has(s)) };
 }
 
 /** Split a comma-joined location string into deduplicated trimmed parts. */
