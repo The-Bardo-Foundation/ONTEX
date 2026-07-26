@@ -1,95 +1,33 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useDocumentTitle } from '../utils/useDocumentTitle';
 
-const CLASSIFICATION_SYSTEM_PROMPT = `You are a clinical trial relevance evaluator for the Osteosarcoma Now Foundation.
+/*
+ * Muted tints rather than saturated green/yellow/red pills — the three labels stay
+ * distinguishable without turning the page into a traffic light. These are not the
+ * semantic recruitment-status badges in `utils/formatters.ts`.
+ */
+const LABEL_CONFIG = {
+  confident: {
+    text: 'Match',
+    chip: 'bg-accent-50 text-accent-800',
+    desc: 'Clearly relevant — published automatically',
+  },
+  unsure: {
+    text: 'Partial Match',
+    chip: 'bg-brand-50 text-brand-600',
+    desc: 'Uncertain eligibility — sent to editorial review',
+  },
+  reject: {
+    text: 'Not Suitable',
+    chip: 'bg-surface-muted text-gray-600',
+    desc: 'Not relevant to osteosarcoma — filtered out',
+  },
+} as const;
 
-Your task: determine whether a clinical trial from ClinicalTrials.gov should be included
-in the Osteosarcoma Now patient-facing database.
+type LabelKey = keyof typeof LABEL_CONFIG;
 
-CRITICAL PRINCIPLE: When uncertain, use "unsure" — do NOT reject. Osteosarcoma is
-a rare cancer with very few treatment options. Missing a relevant trial is far worse
-than including an irrelevant one. The editorial team will make the final decision.
-
-## WHAT OSTEOSARCOMA IS
-
-Osteosarcoma (also called osteogenic sarcoma) is a primary malignant bone tumour. It is
-DISTINCT from the following — do NOT classify these as relevant unless osteosarcoma is
-also explicitly included:
-- Soft tissue sarcomas (leiomyosarcoma, liposarcoma, synovial sarcoma, rhabdomyosarcoma, etc.)
-- Kaposi sarcoma — a vascular tumour caused by HHV-8 infection, unrelated to bone
-- Carcinosarcoma (e.g. uterine or ovarian carcinosarcoma) — a carcinoma variant, NOT a bone tumour
-- Ewing sarcoma and chondrosarcoma are related bone tumours and ARE eligible when listed
-  alongside osteosarcoma or in bone sarcoma cohorts
-
-## LABEL: "confident"
-
-Use "confident" if ANY of these apply:
-- Osteosarcoma or osteogenic sarcoma is named in conditions, title, or eligibility criteria
-- It is a bone sarcoma trial where osteosarcoma is an eligible or named diagnosis
-- It targets relapsed, refractory, metastatic, or newly diagnosed osteosarcoma
-- It is a sarcoma or solid tumour trial where osteosarcoma patients are clearly eligible
-  per the inclusion criteria (e.g. bone sarcoma, high-grade sarcoma, paediatric sarcoma)
-- It is a Phase 1 open-enrolment trial where osteosarcoma patients could reasonably qualify
-- It studies patient-reported outcomes, rehabilitation, exercise, mobility, prosthetics,
-  pain management, survivorship, or quality of life in sarcoma patients — these are directly
-  relevant to osteosarcoma patients, particularly those who have undergone limb-salvage
-  surgery or amputation
-- It explores new therapies potentially relevant to osteosarcoma: immunotherapy, targeted
-  therapy, NK cell therapy, cellular therapy, precision medicine, chemotherapy combinations,
-  or surgical approaches in bone or sarcoma populations
-
-## LABEL: "unsure"
-
-Use "unsure" if you are uncertain whether osteosarcoma patients could enrol. Examples:
-- Broad solid tumour trial with no explicit sarcoma mention, but no explicit exclusion either
-- Paediatric/AYA cancer trial that does not name specific tumour types
-- Supportive care study where sarcoma eligibility is ambiguous
-- Trial mentions "sarcoma" but it is unclear whether bone sarcoma is eligible
-
-## LABEL: "reject"
-
-Use "reject" only when you are confident the trial is irrelevant to osteosarcoma. Typical reasons:
-- Names only cancer types unrelated to osteosarcoma (ovarian, breast, leukemia, prostate,
-  glioma, etc.) and osteosarcoma is not listed as an eligible diagnosis
-- Kaposi sarcoma only — this is a vascular tumour caused by HHV-8, completely unrelated
-  to bone tumours or osteosarcoma
-- Explicitly excludes bone sarcomas or osteosarcoma from eligibility criteria
-- Carcinosarcoma of the uterus or ovary only — this is a carcinoma variant, not a bone tumour
-- Broad cancer population (any advanced solid tumour) with no sarcoma-specific cohort and no
-  indication osteosarcoma patients could enrol
-- Unrelated metabolic, endocrine, neurological, or pain condition without a sarcoma population
-- Soft tissue sarcoma trial that explicitly excludes bone sarcomas
-- Trial is Withdrawn or Terminated
-
-REJECT TRAPS — do NOT let these trick you into rejecting:
-- "Sarcoma" alone does not mean bone sarcoma — check eligibility criteria carefully
-- "Carcinosarcoma" is NOT osteosarcoma — reject unless osteosarcoma is also listed
-- The word "bone" in "bone metastases from carcinoma" is NOT osteosarcoma
-- A trial for soft tissue sarcoma without bone sarcoma eligibility → reject or unsure, not confident
-
-## CONCRETE EXAMPLES
-
-KEEP (confident):
-- Trial evaluating mobility and physical functioning in sarcoma patients after limb-salvage
-  surgery or amputation → directly relevant to osteosarcoma rehabilitation
-- Trial for bone sarcoma patients investigating NK cell therapy → osteosarcoma is eligible
-- Trial studying exercise and chemotherapy uptake in newly diagnosed paediatric/AYA sarcoma
-  patients → population includes osteosarcoma
-
-REJECT:
-- Trial for advanced ovarian, fallopian tube, or primary peritoneal cancer restricted to
-  female patients with those diagnoses → osteosarcoma not eligible; "carcinosarcoma"
-  in the name is a common false-positive trap
-- Trial that explicitly excludes sarcomas originating in bone, including osteosarcoma
-- Trial for Kaposi sarcoma (blood vessel tumour, HHV-8 infection) → unrelated to bone cancer
-
-## OUTPUT FORMAT
-
-Return ONLY valid JSON:
-{
-  "label": "confident",
-  "reason": "1-2 sentence justification referencing the specific eligibility or study focus"
-}`;
+const LABEL_KEYS = Object.keys(LABEL_CONFIG) as LabelKey[];
 
 const EXAMPLES = [
   {
@@ -118,52 +56,74 @@ const EXAMPLES = [
   },
 ];
 
-const LABEL_CONFIG = {
-  confident: {
-    text: 'Match',
-    bg: 'bg-green-100',
-    border: 'border-green-200',
-    textColor: 'text-green-800',
-    dot: 'bg-green-500',
-    desc: 'Clearly relevant — published automatically',
+/*
+ * The three framing facts, shown as figures rather than prose. The colour is
+ * per-stat on purpose: brand blue for the patient count, accent olive for the
+ * staying-current point, near-black for the registry size — one accent each,
+ * no traffic light.
+ */
+const WHY_STATS = [
+  {
+    figure: '~1,000',
+    figureColor: 'text-brand-600',
+    body: (
+      <>
+        people diagnosed with osteosarcoma in the US every year — mostly children and
+        teenagers.
+      </>
+    ),
   },
-  unsure: {
-    text: 'Partial Match',
-    bg: 'bg-yellow-100',
-    border: 'border-yellow-200',
-    textColor: 'text-yellow-800',
-    dot: 'bg-yellow-500',
-    desc: 'Uncertain eligibility — sent to human review',
+  {
+    figure: 'Daily',
+    figureColor: 'text-accent-700',
+    body: (
+      <>
+        trials open, close, and change who they can enrol. Weeks-old information can mean
+        missing the one that fits.
+      </>
+    ),
   },
-  reject: {
-    text: 'Not Suitable',
-    bg: 'bg-red-100',
-    border: 'border-red-200',
-    textColor: 'text-red-800',
-    dot: 'bg-red-500',
-    desc: 'Not relevant to osteosarcoma — filtered out',
+  {
+    figure: '~600k',
+    figureColor: 'text-gray-900',
+    body: (
+      <>
+        studies listed on{' '}
+        <a
+          href="https://clinicaltrials.gov"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-brand-600 underline decoration-brand-200 underline-offset-2 transition-colors hover:decoration-brand-500"
+        >
+          ClinicalTrials.gov
+        </a>
+        . Finding the handful that apply is a full-time job.
+      </>
+    ),
   },
-};
+];
 
 const PIPELINE_STEPS = [
   {
     number: 1,
     title: 'Automated Search',
-    summary: 'Queries ClinicalTrials.gov every 24 hours',
+    summary:
+      'Queries ClinicalTrials.gov every 24 hours and sorts results into new, updated, or unchanged.',
     detail: (
-      <div className="space-y-3 text-sm text-gray-600">
+      <div className="space-y-3 text-sm leading-relaxed text-gray-600">
         <p>
-          Every 24 hours, the system queries the ClinicalTrials.gov API using a set of
-          osteosarcoma-related search terms. It collects all matching trial IDs and their
+          Every 24 hours the system queries the ClinicalTrials.gov API with a set of
+          osteosarcoma-related search terms, collecting all matching trial IDs and their
           last-updated timestamps.
         </p>
         <p>
-          Each result is compared against what's already in our database. Trials are
-          categorised as <strong>new</strong> (never seen before),{' '}
-          <strong>updated</strong> (data changed since last run), or{' '}
-          <strong>already processed</strong> (no change, skip). This means the system
-          catches both newly registered trials and updates to existing ones — nothing slips
-          through.
+          Each result is compared against what is already in the database and sorted into{' '}
+          <strong className="font-semibold text-gray-900">new</strong> (never seen before),{' '}
+          <strong className="font-semibold text-gray-900">updated</strong> (changed since the
+          last run), or{' '}
+          <strong className="font-semibold text-gray-900">already processed</strong> (no
+          change, skipped). That way the system catches both newly registered trials and
+          edits to existing ones.
         </p>
       </div>
     ),
@@ -171,24 +131,25 @@ const PIPELINE_STEPS = [
   {
     number: 2,
     title: 'AI Classification',
-    summary: 'An AI model reads each trial and assigns a relevance label',
-    detail: null, // rendered separately
+    summary: 'Each trial is read in full and assigned one of three labels.',
+    detail: null, // rendered separately by ClassificationStep
   },
   {
     number: 3,
     title: 'AI Summarisation',
-    summary: 'Generates a plain-language summary for patients and families',
+    summary:
+      'Dense medical language becomes a plain-language summary, editable by staff before it goes live.',
     detail: (
-      <div className="space-y-3 text-sm text-gray-600">
+      <div className="space-y-3 text-sm leading-relaxed text-gray-600">
         <p>
-          For trials labelled <strong>confident</strong> or <strong>unsure</strong>, a
-          second AI step generates a patient-friendly summary. Clinical trial descriptions
-          are often written in dense medical language — the summary strips that away and
-          explains what the trial is testing, who it's for, and where it's taking place.
+          For trials labelled <em>Match</em> or <em>Partial Match</em>, a second step
+          generates a patient-friendly summary. Trial descriptions are often written in dense
+          medical language — the summary strips that away and explains what the trial is
+          testing, who it is for, and where it is taking place.
         </p>
         <p>
-          Rejected trials are skipped entirely at this stage to save time and cost. The
-          editorial team can also edit any AI-generated summary before it goes live.
+          Trials found not suitable are skipped at this stage. The editorial team can edit any
+          generated summary before it goes live.
         </p>
       </div>
     ),
@@ -196,26 +157,28 @@ const PIPELINE_STEPS = [
   {
     number: 4,
     title: 'Publish & Review',
-    summary: 'Match trials publish automatically; Partial Match trials go to the editorial team',
+    summary:
+      "Matches publish automatically; partial matches wait for a reviewer's final call, with a diff shown on any later update.",
     detail: (
-      <div className="space-y-3 text-sm text-gray-600">
+      <div className="space-y-3 text-sm leading-relaxed text-gray-600">
         <p>
-          Trials classified as <strong>confident</strong> (Match) are approved automatically
-          and published straight away. Trials classified as <strong>unsure</strong> (Partial
-          Match) land in a private review queue, where a reviewer from the Osteosarcoma Now
-          Foundation reads the AI's classification reason, checks the original trial data,
-          and can edit any field before making a final call.
+          Trials classified as <em>Match</em> are approved automatically and published
+          straight away. Trials classified as <em>Partial Match</em> land in a private review
+          queue, where a reviewer from the Osteosarcoma Now Foundation reads the
+          classification reason, checks the original trial data, and can edit any field before
+          making a final call.
         </p>
         <p>
-          The reviewer can <strong>approve</strong> a queued trial (it goes live), or{' '}
-          <strong>reject</strong> it (it's removed from the public database). When an
-          already-published trial is updated on ClinicalTrials.gov, purely administrative
-          changes (dates, contact details, locations) are synced silently. Otherwise the
-          trial is re-classified: confident stays published, while unsure returns to the
-          review queue with a diff showing exactly what changed.
+          The reviewer can approve a queued trial, which sends it live, or reject it, which
+          removes it from the public database. When an already-published trial changes on
+          ClinicalTrials.gov, purely administrative edits — dates, contact details, locations
+          — are synced silently. Otherwise the trial is re-classified: a clear match stays
+          published, while an uncertain one returns to the review queue with a diff showing
+          exactly what changed.
         </p>
-        <p className="text-gray-500 italic">
-          AI handles the clear matches. Humans make the call on everything uncertain.
+        <p className="text-gray-500">
+          Nothing goes stale, and nothing slips through. Automation handles the clear cases;
+          people decide everything uncertain.
         </p>
       </div>
     ),
@@ -223,226 +186,117 @@ const PIPELINE_STEPS = [
   {
     number: 5,
     title: 'Published',
-    summary: 'Approved trials appear in the public database',
+    summary: 'Live in the public explorer — searchable by phase, location, age, and status.',
     detail: (
-      <div className="space-y-3 text-sm text-gray-600">
+      <div className="space-y-3 text-sm leading-relaxed text-gray-600">
         <p>
-          Once approved, a trial is immediately visible in the public trial explorer.
-          Patients, families, and clinicians can search and filter by phase, location, age
-          range, and status.
+          Once approved, a trial is immediately visible in the public trial explorer. Patients,
+          families, and clinicians can search and filter by phase, location, age range, and
+          recruitment status.
         </p>
         <p>
-          Each trial page shows the AI-generated plain-language summary alongside the
-          official ClinicalTrials.gov data, with direct contact information and a link to
-          the original registry entry.
+          Each trial page shows the plain-language summary alongside the official
+          ClinicalTrials.gov data, with direct contact information and a link to the original
+          registry entry.
         </p>
       </div>
     ),
   },
 ];
 
-function LabelBadge({ label }: { label: keyof typeof LABEL_CONFIG }) {
-  const cfg = LABEL_CONFIG[label];
+function LabelChip({ label }: { label: LabelKey }) {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${cfg.bg} ${cfg.textColor} border ${cfg.border}`}
+      className={`inline-flex items-center rounded px-2.5 py-1 text-xs font-semibold ${LABEL_CONFIG[label].chip}`}
     >
-      <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
-      {cfg.text}
+      {LABEL_CONFIG[label].text}
     </span>
   );
 }
 
-function ClassificationStep({ onShowPrompt }: { onShowPrompt: () => void }) {
+function ClassificationStep() {
   return (
-    <div className="space-y-6 text-sm text-gray-600">
+    <div className="space-y-6 text-sm leading-relaxed text-gray-600">
       <p>
-        For each new or updated trial, Claude AI reads the full study record — title,
-        conditions, eligibility criteria, phase, and more — and assigns one of three
-        labels:
+        For each new or updated trial, the model reads the full study record — title,
+        conditions, eligibility criteria, phase, and more — and assigns one of three labels.
       </p>
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        {(Object.keys(LABEL_CONFIG) as (keyof typeof LABEL_CONFIG)[]).map((key) => {
-          const cfg = LABEL_CONFIG[key];
-          return (
-            <div
-              key={key}
-              className={`rounded-lg border p-3 ${cfg.bg} ${cfg.border}`}
-            >
-              <LabelBadge label={key} />
-              <p className={`mt-2 text-xs ${cfg.textColor}`}>{cfg.desc}</p>
-            </div>
-          );
-        })}
-      </div>
+      <dl className="space-y-2.5">
+        {LABEL_KEYS.map((key) => (
+          <div key={key} className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-4">
+            <dt className="sm:w-32 sm:shrink-0">
+              <LabelChip label={key} />
+            </dt>
+            <dd className="text-sm text-gray-500">{LABEL_CONFIG[key].desc}</dd>
+          </div>
+        ))}
+      </dl>
 
-      <div>
-        <p className="font-medium text-gray-700 mb-3">
-          How might the AI classify these three trials?
+      <div className="space-y-3">
+        <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+          Worked examples
         </p>
-        <div className="space-y-3">
-          {EXAMPLES.map((ex) => (
-            <div
-              key={ex.label}
-              className="rounded-lg border border-gray-200 bg-white p-4 space-y-2"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <p className="font-medium text-gray-900 text-sm leading-snug">{ex.title}</p>
-                <LabelBadge label={ex.label} />
-              </div>
-              <p className="text-xs text-gray-500">{ex.description}</p>
-              <p className="text-xs text-gray-600">
-                <span className="font-medium">AI reasoning:</span> {ex.reason}
-              </p>
+        {EXAMPLES.map((ex) => (
+          <div key={ex.label} className="rounded border border-line bg-surface p-4">
+            <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+              <p className="text-sm font-semibold leading-snug text-gray-900">{ex.title}</p>
+              <span className="shrink-0">
+                <LabelChip label={ex.label} />
+              </span>
             </div>
-          ))}
-        </div>
-      </div>
-
-      <button
-        onClick={onShowPrompt}
-        className="inline-flex items-center gap-2 text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors"
-      >
-        <span>See exactly what the AI is asked</span>
-        <span aria-hidden>→</span>
-      </button>
-    </div>
-  );
-}
-
-function PromptModal({ onClose }: { onClose: () => void }) {
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    const previousFocusedElement = document.activeElement;
-    closeButtonRef.current?.focus();
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onClose();
-        return;
-      }
-
-      if (event.key !== 'Tab' || !dialogRef.current) {
-        return;
-      }
-
-      const focusableElements = dialogRef.current.querySelectorAll<HTMLElement>(
-        'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      );
-
-      if (focusableElements.length === 0) {
-        event.preventDefault();
-        dialogRef.current.focus();
-        return;
-      }
-
-      const firstElement = focusableElements[0];
-      const lastElement = focusableElements[focusableElements.length - 1];
-      const activeElement = document.activeElement;
-
-      if (event.shiftKey && activeElement === firstElement) {
-        event.preventDefault();
-        lastElement.focus();
-      } else if (!event.shiftKey && activeElement === lastElement) {
-        event.preventDefault();
-        firstElement.focus();
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-      if (previousFocusedElement instanceof HTMLElement) {
-        previousFocusedElement.focus();
-      }
-    };
-  }, [onClose]);
-
-  return (
-    <div
-      className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"
-      onClick={onClose}
-      aria-hidden="true"
-    >
-      <div
-        ref={dialogRef}
-        className="relative bg-gray-900 rounded-xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="ai-system-prompt-title"
-        aria-describedby="ai-system-prompt-description"
-        tabIndex={-1}
-      >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-700">
-          <div>
-            <p id="ai-system-prompt-title" className="text-sm font-semibold text-white">
-              AI System Prompt
-            </p>
-            <p id="ai-system-prompt-description" className="text-xs text-gray-400 mt-0.5">
-              Sent to the AI classification system before every trial classification
+            <p className="mt-1.5 text-sm text-gray-500">{ex.description}</p>
+            <p className="mt-1.5 text-sm text-gray-600">
+              <span className="font-semibold text-gray-900">Reasoning: </span>
+              {ex.reason}
             </p>
           </div>
-          <button
-            ref={closeButtonRef}
-            onClick={onClose}
-            className="text-gray-400 hover:text-white transition-colors text-xl leading-none"
-            aria-label="Close"
-          >
-            ×
-          </button>
-        </div>
-        <div className="overflow-y-auto flex-1 p-5">
-          <pre className="text-xs font-mono text-green-300 whitespace-pre-wrap leading-relaxed">
-            {CLASSIFICATION_SYSTEM_PROMPT}
-          </pre>
-        </div>
+        ))}
       </div>
     </div>
   );
 }
 
 export function LandingPage() {
+  useDocumentTitle('Clinical Trial Explorer');
+
   const [activeStep, setActiveStep] = useState<number | null>(null);
-  const [showPrompt, setShowPrompt] = useState(false);
 
   const toggleStep = (n: number) => setActiveStep((prev) => (prev === n ? null : n));
 
   return (
-    <div className="bg-gray-50">
-      {showPrompt && <PromptModal onClose={() => setShowPrompt(false)} />}
-
+    <div className="bg-white">
       {/* ── Hero ── */}
-      <section className="bg-white border-b border-gray-100">
-        <div className="max-w-3xl mx-auto px-6 py-20 text-center">
-          <div className="flex items-center justify-center gap-8 mb-10">
-            <img src="/bardo-logo.png" alt="The Bardo Foundation" className="h-16 w-auto" />
-            <div className="w-px h-12 bg-gray-200" />
-            <img src="/osteosarcoma-logo.png" alt="Osteosarcoma Now" className="h-16 w-auto" />
-          </div>
-          <h1 className="text-4xl font-bold text-gray-900 tracking-tight mb-4">
+      <section className="border-b border-line">
+        <div className="mx-auto max-w-4xl px-6 py-16 text-center sm:py-20">
+          {/*
+            max-h rather than a fixed h: the logo is 5.6:1, so at this size it is
+            wider than a phone screen. Both constraints being maxima lets the width
+            bind on narrow viewports without squashing the aspect ratio.
+          */}
+          <img
+            src="/osn-bardo-logo.png"
+            alt="Osteosarcoma Now — managed by Bardo Foundation"
+            className="mx-auto max-h-20 max-w-full"
+          />
+          <h1 className="mt-10 text-4xl font-bold leading-[1.15] tracking-tight text-gray-900">
             Osteosarcoma Clinical Trial Explorer
           </h1>
-          <p className="text-lg text-gray-500 max-w-xl mx-auto mb-8">
+          <p className="mx-auto mt-5 max-w-xl text-lg leading-relaxed text-gray-500">
             An automated, AI-assisted pipeline that monitors ClinicalTrials.gov daily and
             surfaces relevant osteosarcoma trials — reviewed by humans before they reach
             patients.
           </p>
-          <div className="flex items-center justify-center gap-4 flex-wrap">
+          <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
             <Link
               to="/trials"
-              className="px-6 py-3 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 transition-colors"
+              className="rounded bg-brand-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-brand-700"
             >
               Browse Trials
             </Link>
             <a
               href="#how-it-works"
-              className="px-6 py-3 bg-white text-gray-700 border border-gray-300 rounded-lg text-sm font-semibold hover:bg-gray-50 transition-colors"
+              className="rounded border border-line bg-white px-6 py-3 text-sm font-semibold text-brand-600 transition-colors hover:border-brand-200 hover:bg-brand-50"
             >
               How it works
             </a>
@@ -450,119 +304,142 @@ export function LandingPage() {
         </div>
       </section>
 
-      {/* ── Why section ── */}
-      <section className="max-w-3xl mx-auto px-6 py-16">
-        <h2 className="text-2xl font-bold text-gray-900 mb-6">Why this exists</h2>
-        <div className="grid gap-6 sm:grid-cols-3">
-          {[
-            {
-              heading: 'A rare cancer',
-              body: 'Osteosarcoma affects roughly 1,000 people in the US each year, primarily children and teenagers. It is the most common primary bone cancer.',
-            },
-            {
-              heading: 'Few options',
-              body: 'Treatment has changed little in decades. Clinical trials often represent the best — sometimes only — path to newer therapies. Knowing they exist matters.',
-            },
-            {
-              heading: 'An overwhelming search',
-              body: 'ClinicalTrials.gov lists hundreds of thousands of studies. Finding the ones that actually apply to osteosarcoma, and keeping that list current, is a full-time job.',
-            },
-          ].map(({ heading, body }) => (
-            <div key={heading} className="bg-white rounded-xl border border-gray-200 p-5">
-              <p className="font-semibold text-gray-900 mb-2">{heading}</p>
-              <p className="text-sm text-gray-500 leading-relaxed">{body}</p>
-            </div>
-          ))}
+      {/* ── Why this exists ── */}
+      <section className="border-b border-line bg-surface">
+        <div className="mx-auto max-w-4xl px-6 py-14">
+          <h2 className="text-xs font-semibold uppercase tracking-[0.18em] text-accent-600">
+            Why this exists
+          </h2>
+          <p className="mt-5 max-w-xl text-[1.75rem] font-bold leading-snug tracking-tight text-gray-900">
+            A rare cancer, with trials nobody can keep up with.
+          </p>
+
+          <dl className="mt-10 grid gap-8 sm:grid-cols-3 sm:gap-0">
+            {WHY_STATS.map(({ figure, figureColor, body }, i) => (
+              <div
+                key={figure}
+                className={`sm:px-6 ${i === 0 ? 'sm:pl-0' : 'sm:border-l sm:border-line'}`}
+              >
+                <dt className={`text-3xl font-bold tracking-tight ${figureColor}`}>
+                  {figure}
+                </dt>
+                <dd className="mt-2 text-sm leading-relaxed text-gray-500">{body}</dd>
+              </div>
+            ))}
+          </dl>
         </div>
       </section>
 
       {/* ── Pipeline ── */}
-      <section id="how-it-works" className="max-w-3xl mx-auto px-6 pb-16">
-        <h2 className="text-2xl font-bold text-gray-900 mb-2">How it works</h2>
-        <p className="text-sm text-gray-500 mb-8">
-          Click any step to see what happens under the hood.
-        </p>
+      <section id="how-it-works" className="border-b border-line">
+        <div className="mx-auto max-w-4xl px-6 py-14">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-accent-600">
+            How it works
+          </p>
+          <h2 className="mt-3 text-2xl font-bold tracking-tight text-gray-900">
+            Five steps, every 24 hours
+          </h2>
+          <p className="mt-2 text-sm text-gray-500">
+            Automated end to end, with a human checking anything uncertain. Select a step for
+            the detail.
+          </p>
 
-        <div className="space-y-3">
-          {PIPELINE_STEPS.map((step) => {
-            const isOpen = activeStep === step.number;
-            const isAI = step.number === 2;
+          {/* Vertical timeline: the rail is drawn behind each step's numeral circle */}
+          <ol className="mt-9">
+            {PIPELINE_STEPS.map((step, i) => {
+              const isOpen = activeStep === step.number;
+              const isClassification = step.number === 2;
+              const isLast = i === PIPELINE_STEPS.length - 1;
 
-            return (
-              <div
-                key={step.number}
-                className={`bg-white rounded-xl border transition-all ${
-                  isOpen ? 'border-blue-200 shadow-sm' : 'border-gray-200'
-                }`}
-              >
-                <button
-                  onClick={() => toggleStep(step.number)}
-                  className="w-full flex items-center gap-4 px-5 py-4 text-left"
-                >
-                  <span
-                    className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-colors ${
-                      isOpen
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-blue-50 text-blue-600'
-                    }`}
+              return (
+                <li key={step.number} className={`relative ${isLast ? '' : 'pb-8'}`}>
+                  {!isLast && (
+                    <span
+                      aria-hidden
+                      className="absolute bottom-2 left-[13px] top-8 w-px bg-line"
+                    />
+                  )}
+                  <button
+                    onClick={() => toggleStep(step.number)}
+                    aria-expanded={isOpen}
+                    className="group flex w-full items-start gap-4 text-left"
                   >
-                    {step.number}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-gray-900 text-sm">{step.title}</p>
-                    <p className="text-xs text-gray-500 mt-0.5">{step.summary}</p>
-                  </div>
-                  <span
-                    className={`text-gray-400 transition-transform duration-200 ${
-                      isOpen ? 'rotate-180' : ''
-                    }`}
-                  >
-                    ▾
-                  </span>
-                </button>
+                    <span
+                      className={`relative z-10 flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full text-xs font-semibold transition-colors ${
+                        isOpen
+                          ? 'bg-brand-600 text-white'
+                          : 'bg-brand-50 text-brand-600 group-hover:bg-brand-100'
+                      }`}
+                    >
+                      {step.number}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[0.9375rem] font-semibold text-gray-900 transition-colors group-hover:text-brand-700">
+                        {step.title}
+                      </span>
+                      <span className="mt-1 block text-sm leading-relaxed text-gray-500">
+                        {step.summary}
+                      </span>
+                    </span>
+                    {/* The only thing signalling that a step opens, so it gets a
+                        resting tint of its own rather than appearing on hover. */}
+                    <svg
+                      aria-hidden
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.75"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className={`mt-1 h-4 w-4 shrink-0 transition-transform duration-200 ${
+                        isOpen
+                          ? 'rotate-180 text-brand-600'
+                          : 'text-brand-400 group-hover:text-brand-600'
+                      }`}
+                    >
+                      <path d="M4 6.5l4 4 4-4" />
+                    </svg>
+                  </button>
 
-                {isOpen && (
-                  <div className="px-5 pb-5 pt-1 border-t border-gray-100">
-                    {isAI ? (
-                      <ClassificationStep onShowPrompt={() => setShowPrompt(true)} />
-                    ) : (
-                      step.detail
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+                  {/* The three labels stay visible on step 2 even when collapsed —
+                      they are the shorthand for what the whole pipeline produces. */}
+                  {isClassification && !isOpen && (
+                    <div className="mt-3 flex flex-wrap gap-2 pl-10">
+                      {LABEL_KEYS.map((key) => (
+                        <LabelChip key={key} label={key} />
+                      ))}
+                    </div>
+                  )}
 
-        {/* ── Automation callout ── */}
-        <div className="mt-8 rounded-xl bg-blue-50 border border-blue-100 px-6 py-5 flex gap-4 items-start">
-          <span className="text-2xl">⏱</span>
-          <div>
-            <p className="font-semibold text-blue-900 text-sm">Runs automatically every 24 hours</p>
-            <p className="text-sm text-blue-700 mt-1">
-              When a trial is updated on ClinicalTrials.gov, it is re-fetched and
-              re-classified. Substantive changes can send it back through human review —
-              with a diff showing exactly what changed. Nothing slips through, and no trial
-              is ever silently outdated.
-            </p>
-          </div>
+                  {isOpen && (
+                    <div className="pl-10 pt-4">
+                      {isClassification ? (
+                        <ClassificationStep />
+                      ) : (
+                        step.detail
+                      )}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
         </div>
       </section>
 
-      {/* ── Final CTA ── */}
-      <section className="border-t border-gray-200 bg-white">
-        <div className="max-w-3xl mx-auto px-6 py-16 text-center">
-          <h2 className="text-2xl font-bold text-gray-900 mb-3">
+      {/* ── Closing CTA ── */}
+      <section className="bg-surface">
+        <div className="mx-auto max-w-4xl px-6 py-16 text-center">
+          <h2 className="text-2xl font-bold tracking-tight text-gray-900">
             Find a trial that fits
           </h2>
-          <p className="text-sm text-gray-500 mb-8 max-w-md mx-auto">
-            Every trial in this database has been automatically screened for relevance to
-            osteosarcoma, with uncertain cases reviewed by the editorial team.
+          <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-gray-500">
+            Every trial has been automatically screened for relevance, with uncertain cases
+            reviewed by the editorial team.
           </p>
           <Link
             to="/trials"
-            className="px-8 py-3 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 transition-colors"
+            className="mt-8 inline-block rounded bg-brand-600 px-7 py-3 text-sm font-semibold text-white transition-colors hover:bg-brand-700"
           >
             Browse Trials
           </Link>

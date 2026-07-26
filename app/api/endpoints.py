@@ -45,6 +45,19 @@ def _find_step(step_id: str) -> dict:
     raise KeyError(step_id)
 
 
+def _mark_earlier_steps_done(step_id: str) -> None:
+    """Mark every pipeline step before `step_id` as done.
+
+    Entering a later step implies the earlier ones have finished, so demote any
+    still-`active` predecessor to `done` (otherwise their spinners keep running).
+    """
+    for s in _ingestion_status["steps"]:
+        if s["id"] == step_id:
+            break
+        if s["state"] == "active":
+            s["state"] = "done"
+
+
 async def _ingestion_progress_callback(event: dict) -> None:
     step_id = event.get("step")
     if step_id == "searching":
@@ -54,6 +67,7 @@ async def _ingestion_progress_callback(event: dict) -> None:
         s["state"] = "done"
         s["note"] = f"{event.get('count', 0):,} candidates found"
     elif step_id in ("fetching_details", "classifying", "summarizing"):
+        _mark_earlier_steps_done(step_id)
         s = _find_step(step_id)
         s["state"] = "active"
         s["count"] = event.get("count")

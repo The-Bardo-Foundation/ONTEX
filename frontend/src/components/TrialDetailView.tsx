@@ -11,7 +11,7 @@ import { StatusBadge } from './StatusBadge';
 function InfoField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="text-xs font-semibold uppercase tracking-wide text-blue-900/60 mb-0.5">{label}</p>
+      <p className="text-xs font-semibold uppercase tracking-wide text-brand-900/60 mb-0.5">{label}</p>
       <div className="text-sm text-gray-800 leading-snug">{children}</div>
     </div>
   );
@@ -148,7 +148,7 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
         )}
 
         {/* Key facts */}
-        <div className="bg-blue-50 border border-blue-100 rounded-xl p-6">
+        <div className="bg-brand-50 border border-brand-100 rounded-xl p-6">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-10 gap-y-5">
             <div className="space-y-5">
               {locationSummary && (
@@ -156,7 +156,7 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
                   <p>{locationSummary}</p>
                   {locationVerbose && (
                     <details className="mt-2 group">
-                      <summary className="cursor-pointer list-none text-xs text-blue-700 hover:underline">
+                      <summary className="cursor-pointer list-none text-xs text-brand-700 hover:underline">
                         View all locations
                       </summary>
                       <div className="mt-2 space-y-2 text-sm text-gray-600 leading-relaxed">
@@ -191,10 +191,10 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
                   <div className="space-y-0.5">
                     {contact && <p>{contact}</p>}
                     {phone && (
-                      <a href={`tel:${phone.replace(/\s+/g, '')}`} className="block text-blue-700 hover:underline">{phone}</a>
+                      <a href={`tel:${phone.replace(/\s+/g, '')}`} className="block text-brand-700 hover:underline">{phone}</a>
                     )}
                     {email && (
-                      <a href={`mailto:${email}`} className="block text-blue-700 hover:underline break-all">{email}</a>
+                      <a href={`mailto:${email}`} className="block text-brand-700 hover:underline break-all">{email}</a>
                     )}
                   </div>
                 ) : (
@@ -202,7 +202,7 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
                     href={`https://clinicaltrials.gov/study/${trial.nct_id}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-blue-600 hover:underline"
+                    className="text-brand-600 hover:underline"
                   >
                     View trial on ClinicalTrials.gov
                   </a>
@@ -233,7 +233,7 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
 
         {/* Interventions — collapsed by default; the text can be very long */}
         {intervention && (
-          <details className="group border-t border-gray-100 pt-4">
+          <details className="group border-t border-line-soft pt-4">
             <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-semibold text-gray-700 uppercase tracking-wide">
               Interventions
               <svg
@@ -251,7 +251,7 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
         )}
 
         {/* What to do next — static guidance shown on every trial */}
-        <section className="bg-gray-50 border border-gray-200 rounded-xl p-6 space-y-3">
+        <section className="bg-surface border border-line rounded-xl p-6 space-y-3">
           <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">What to do next</h2>
           <p className="text-sm text-gray-700 leading-relaxed">
             If you think this clinical trial may be relevant to you or your child, the next
@@ -269,7 +269,7 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
                 href="https://osteosarcomanow.org/questions-for-doctor/"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-blue-600 hover:underline"
+                className="text-brand-600 hover:underline"
               >
                 Questions for Your Doctor
               </a>
@@ -299,7 +299,7 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
             {adminMode && !editMode && (
               <button
                 onClick={() => setEditMode(true)}
-                className="px-3 py-1 text-sm font-medium rounded border border-blue-300 text-blue-600 hover:bg-blue-50 transition-colors"
+                className="px-3 py-1 text-sm font-medium rounded border border-brand-300 text-brand-600 hover:bg-brand-50 transition-colors"
               >
                 Edit
               </button>
@@ -307,7 +307,7 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
             {adminMode && editMode && (
               <button
                 onClick={cancelEdit}
-                className="px-3 py-1 text-sm font-medium rounded border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors"
+                className="px-3 py-1 text-sm font-medium rounded border border-gray-300 text-gray-600 hover:bg-surface transition-colors"
               >
                 Cancel
               </button>
@@ -393,7 +393,7 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
             <div className="mb-3">
               <label className="block text-xs font-medium text-gray-500 mb-1">Reviewer notes (optional)</label>
               <textarea
-                className="w-full border border-gray-300 rounded p-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-400"
+                className="w-full border border-gray-300 rounded p-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-brand-400"
                 rows={2}
                 placeholder="Add a note for the record…"
                 value={reviewerNotes}
@@ -441,7 +441,7 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
                     <button
                       onClick={handleSaveEdit}
                       disabled={submitting}
-                      className="px-4 py-2 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 ml-auto"
+                      className="px-4 py-2 text-sm font-medium rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 ml-auto"
                     >
                       Save Changes
                     </button>
@@ -460,7 +460,7 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
                   <div className="flex gap-3 justify-end">
                     <button
                       onClick={() => setMarkIrrelevantMode(false)}
-                      className="px-4 py-2 text-sm rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+                      className="px-4 py-2 text-sm rounded border border-gray-300 text-gray-600 hover:bg-surface"
                     >
                       Cancel
                     </button>

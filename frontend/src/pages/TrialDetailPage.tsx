@@ -4,6 +4,7 @@ import { useAuth } from '@clerk/clerk-react';
 import { approveTrial, editTrial, getTrial, markTrialIrrelevant, rejectTrial } from '../api';
 import { TrialDetailView } from '../components/TrialDetailView';
 import type { CustomEdits, TrialDetail } from '../types';
+import { useDocumentTitle } from '../utils/useDocumentTitle';
 
 export function TrialDetailPage() {
   const { nct_id } = useParams<{ nct_id: string }>();
@@ -11,6 +12,12 @@ export function TrialDetailPage() {
   const { isSignedIn } = useAuth();
   const [detail, setDetail] = useState<TrialDetail | null>(null);
   const [notFound, setNotFound] = useState(false);
+
+  // `null` until the trial arrives, so the tab keeps the previous title rather
+  // than flashing a placeholder. Prefer the plain-language title when there is one.
+  useDocumentTitle(
+    notFound ? 'Trial not found' : detail?.custom_brief_title ?? detail?.brief_title ?? null,
+  );
 
   useEffect(() => {
     if (!nct_id) return;
@@ -53,7 +60,7 @@ export function TrialDetailPage() {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-3">
         <p className="text-sm text-gray-500">Trial not found.</p>
-        <button onClick={() => navigate('/trials')} className="text-sm text-blue-600 hover:underline">
+        <button onClick={() => navigate('/trials')} className="text-sm text-brand-600 hover:underline">
           Back to All Trials
         </button>
       </div>

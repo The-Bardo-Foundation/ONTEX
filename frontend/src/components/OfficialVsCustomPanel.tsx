@@ -47,7 +47,7 @@ function PublicFieldRow({ label, officialVal, customVal }: { label: string; offi
             {showSource ? 'Hide source' : 'View source (ClinicalTrials.gov)'}
           </button>
           {showSource && (
-            <div className="mt-2 rounded border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600 leading-relaxed whitespace-pre-wrap">
+            <div className="mt-2 rounded border border-line bg-surface px-3 py-2 text-xs text-gray-600 leading-relaxed whitespace-pre-wrap">
               {officialVal}
             </div>
           )}
@@ -70,12 +70,12 @@ export function OfficialVsCustomPanel({ trial, edits, onChange }: Props) {
             <div key={label}>
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">{label}</p>
               <div className="grid grid-cols-2 gap-3">
-                <div className="rounded border border-gray-200 bg-gray-50 p-2 text-xs text-gray-700 whitespace-pre-wrap min-h-[48px]">
+                <div className="rounded border border-line bg-surface p-2 text-xs text-gray-700 whitespace-pre-wrap min-h-[48px]">
                   {officialVal || <span className="text-gray-400 italic">Not provided</span>}
                 </div>
                 {multiline ? (
                   <textarea
-                    className="rounded border border-gray-300 p-2 text-xs text-gray-900 resize-y min-h-[48px] focus:outline-none focus:ring-2 focus:ring-blue-400"
+                    className="rounded border border-gray-300 p-2 text-xs text-gray-900 resize-y min-h-[48px] focus:outline-none focus:ring-2 focus:ring-brand-400"
                     value={customVal ?? ''}
                     onChange={(e) => onChange(customKey, e.target.value)}
                     placeholder="Edit custom value…"
@@ -83,7 +83,7 @@ export function OfficialVsCustomPanel({ trial, edits, onChange }: Props) {
                 ) : (
                   <input
                     type="text"
-                    className="rounded border border-gray-300 p-2 text-xs text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                    className="rounded border border-gray-300 p-2 text-xs text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-400"
                     value={customVal ?? ''}
                     onChange={(e) => onChange(customKey, e.target.value)}
                     placeholder="Edit custom value…"

@@ -41,7 +41,7 @@ export function FeedbackButton() {
         <div
           role="dialog"
           aria-label="Feedback options"
-          className="w-80 rounded-lg border border-gray-200 bg-white p-4 shadow-xl"
+          className="w-80 rounded-lg border border-line bg-white p-4 shadow-xl"
         >
           <div className="mb-3">
             <h2 className="text-sm font-semibold text-gray-900">
@@ -58,7 +58,7 @@ export function FeedbackButton() {
               href={GOOGLE_FORM_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="block rounded-md border border-gray-200 p-3 transition hover:border-blue-400 hover:bg-blue-50"
+              className="block rounded-md border border-line p-3 transition hover:border-brand-400 hover:bg-brand-50"
             >
               <div className="text-sm font-medium text-gray-900">
                 General feedback
@@ -73,7 +73,7 @@ export function FeedbackButton() {
               href={GITHUB_ISSUES_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="block rounded-md border border-gray-200 p-3 transition hover:border-blue-400 hover:bg-blue-50"
+              className="block rounded-md border border-line p-3 transition hover:border-brand-400 hover:bg-brand-50"
             >
               <div className="text-sm font-medium text-gray-900">
                 Report on GitHub
@@ -92,7 +92,7 @@ export function FeedbackButton() {
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="dialog"
-        className="flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-lg transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+        className="flex items-center gap-2 rounded-full bg-brand-600 px-4 py-2.5 text-sm font-medium text-white shadow-lg transition hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
