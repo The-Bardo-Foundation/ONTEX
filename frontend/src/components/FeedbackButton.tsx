@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
+import { useEditMode } from '../context/EditModeContext';
 
 const GOOGLE_FORM_URL =
   'https://docs.google.com/forms/d/e/1FAIpQLSeY3LQ8rE-uyddr96IefrzM92_DZBiW4VIEbDFul0jVyoQs7w/viewform';
 const GITHUB_ISSUES_URL = 'https://github.com/The-Bardo-Foundation/ONTEX/issues';
 
 export function FeedbackButton() {
+  const { isEditMode } = useEditMode();
   const [open, setOpen] = useState(false);
+
+  if (isEditMode) return null;
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {

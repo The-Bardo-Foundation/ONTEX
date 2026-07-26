@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { CustomEdits, TrialDetail } from '../types';
 import { formatLocationSummary, formatPhase, getOverallStatusDisplay, isLocationVerbose } from '../utils/formatters';
@@ -7,6 +7,7 @@ import { FieldDiffPanel } from './FieldDiffPanel';
 import { IngestionEventBadge } from './IngestionEventBadge';
 import { OfficialVsCustomPanel } from './OfficialVsCustomPanel';
 import { StatusBadge } from './StatusBadge';
+import { useEditMode } from '../context/EditModeContext';
 
 function InfoField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -33,6 +34,12 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
   const [editMode, setEditMode] = useState(false);
   const [markIrrelevantMode, setMarkIrrelevantMode] = useState(false);
   const [irrelevanceReason, setIrrelevanceReason] = useState('');
+
+  const { setIsEditMode } = useEditMode();
+  useEffect(() => {
+    setIsEditMode(editMode);
+    return () => setIsEditMode(false);
+  }, [editMode]);
 
   function handleFieldChange(field: keyof CustomEdits, value: string) {
     setEdits((prev) => ({ ...prev, [field]: value }));

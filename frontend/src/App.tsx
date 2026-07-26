@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { SignIn, useAuth } from '@clerk/clerk-react';
 import { Layout } from './components/Layout';
+import { EditModeProvider } from './context/EditModeContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { LandingPage } from './pages/LandingPage';
 import { AllTrialsPage } from './pages/AllTrialsPage';
@@ -30,6 +31,7 @@ function App() {
   }, [getToken]);
 
   return (
+    <EditModeProvider>
     <Routes>
       {/* Public routes */}
       <Route path="/" element={<Layout variant="public"><LandingPage /></Layout>} />
@@ -57,6 +59,7 @@ function App() {
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </EditModeProvider>
   );
 }
 
