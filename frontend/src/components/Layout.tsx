@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { useState } from 'react';
-import { Link, NavLink } from 'react-router-dom';
+import { Link, NavLink, useLocation } from 'react-router-dom';
 import { SignInButton, UserButton, useAuth } from '@clerk/clerk-react';
 import { IngestionDashboardModal } from './IngestionDashboardModal';
 import { FeedbackButton } from './FeedbackButton';
@@ -16,6 +16,7 @@ export function Layout({
 }) {
   const [showIngestion, setShowIngestion] = useState(false);
   const { isSignedIn } = useAuth();
+  const { pathname } = useLocation();
 
   const adminNavLinkClass = ({ isActive }: { isActive: boolean }) =>
     `block px-3 py-2 rounded-md text-sm font-medium ${
@@ -67,7 +68,7 @@ export function Layout({
           </div>
         </nav>
         <main className="flex-1">{children}</main>
-        <FeedbackButton />
+        {pathname === '/' && <FeedbackButton />}
       </div>
     );
   }
