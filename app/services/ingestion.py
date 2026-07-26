@@ -15,7 +15,9 @@ Step 3.6 Skip both UPDATED clinical_trials AND re-evaluated irrelevant_trials
          whose only changes are in settings.IGNORED_UPDATE_FIELDS (e.g. date,
          location, contact info). Affected rows have their official_* fields
          silently synced - no AI re-classification, no status reset.
-Step 4  Classify relevance with AI (confident / unsure / reject)
+Step 4  Classify relevance with AI (confident / unsure / reject). If the AI call
+        itself fails (outage/error), the trial is skipped entirely this run — no row
+        is written — so Step 2's date-diff logic refetches and re-evaluates it next run.
 Step 5  Generate patient-friendly custom_* fields via AI summarisation (confident/unsure only)
 Step 6  Upsert into clinical_trials or irrelevant_trials; promote previously-
         rejected NCTs to clinical_trials (and delete their IrrelevantTrial row)
@@ -37,6 +39,7 @@ Status assignment in Step 6:
   - AI label "confident" → APPROVED, approved_by="ai" (auto-published, no human review)
   - AI label "unsure"    → PENDING_REVIEW (queued for editorial review)
   - AI label "reject"    → IrrelevantTrial table (not in ClinicalTrial at all)
+  - AI call failed       → skipped entirely (no row written); refetched next run
 
 This means an updated trial that the AI re-classifies as confident stays APPROVED
 without bouncing back to PENDING_REVIEW. Updated trials that drop to "unsure" do
@@ -367,7 +370,6 @@ async def run_daily_ingestion(
     # If OPENROUTER_API_KEY is not set, AIClient raises RuntimeError here.
     # ──────────────────────────────────────────────────────────
     ai_client = AIClient()
-    classify_errors = 0
     classify_total = len(fetched)
 
     # classifications[nct_id] = ClassificationResult
@@ -386,11 +388,14 @@ async def run_daily_ingestion(
             classification = await classify_trial(ai_client, trial_data)
         except Exception as exc:
             logger.error("classify_trial raised for %s: %s", nct_id, exc)
-            classify_errors += 1
-            # Fail-safe: include for manual review rather than silently skip
+            # Genuine AI failure: flag it so this trial is skipped (not stored) and
+            # refetched on the next run, rather than parked as a bogus "unsure".
             classification = ClassificationResult(
                 label=ConfidenceLabel.UNSURE,
-                reason=f"Classification error — needs manual review: {exc}",
+                # Truncated: reason has max_length=500, and a ValidationError
+                # raised here would abort the whole run.
+                reason=f"Classification error: {exc}"[:500],
+                failed=True,
             )
         classifications[nct_id] = classification
         await emit({
@@ -400,16 +405,23 @@ async def run_daily_ingestion(
             "total": classify_total,
         })
 
-    # Split fetched trials: only confident/unsure get AI summaries
+    # Trials whose classification genuinely failed (LLM outage/error) are written
+    # NOWHERE this run — leaving the DB untouched so Step 2's date-diff logic
+    # refetches and re-evaluates them on the next daily run.
+    failed_ids = {nct for nct, c in classifications.items() if c.failed}
+    classify_errors = len(failed_ids)
+
+    # Split fetched trials: only confident/unsure (and not failed) get AI summaries;
+    # reject (and not failed) go to the irrelevant table; failed go nowhere.
     to_summarize = [
         td for td in fetched
-        if classifications.get(td.get("nct_id"), ClassificationResult(
-            label=ConfidenceLabel.REJECT, reason=""
-        )).label != ConfidenceLabel.REJECT
+        if td.get("nct_id") not in failed_ids
+        and classifications[td.get("nct_id")].label != ConfidenceLabel.REJECT
     ]
     to_reject = [
         td for td in fetched
-        if td not in to_summarize
+        if td.get("nct_id") not in failed_ids
+        and classifications[td.get("nct_id")].label == ConfidenceLabel.REJECT
     ]
 
     # ──────────────────────────────────────────────────────────
@@ -553,7 +565,7 @@ async def run_daily_ingestion(
     logger.info(
         "Ingestion complete: %d new, %d updated, %d skipped (unchanged), %d re-evaluated | "
         "%d relevant (%d auto-approved, %d pending review), %d irrelevant | "
-        "%d fetch errors, %d classify errors | "
+        "%d fetch errors, %d classify failures (skipped, will retry next run) | "
         "search_terms=%s, total_candidates=%d",
         len(new_trials),
         updated_trials_count,
