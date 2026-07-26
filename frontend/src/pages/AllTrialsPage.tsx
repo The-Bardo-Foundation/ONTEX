@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getIrrelevantTrials, getTrialFacets, getTrials } from '../api';
-import type { GetIrrelevantTrialsParams, GetTrialsParams, IrrelevantTrialListItem, IrrelevantTrialsListResponse, TrialFacets } from '../api';
+import type { GetIrrelevantTrialsParams, GetTrialsParams, IrrelevantTrialListItem, IrrelevantTrialsListResponse, StatusFacet, TrialFacets } from '../api';
 import { IngestionEventBadge } from '../components/IngestionEventBadge';
 import { IrrelevantTrialDetailModal } from '../components/IrrelevantTrialDetailModal';
 import { StatusBadge } from '../components/StatusBadge';
 import type { TrialListItem, TrialsListResponse } from '../types';
-import { formatLocationSummary, formatPhase, getOverallStatusDisplay } from '../utils/formatters';
+import { formatLocationSummary, formatPhase, getOverallStatusDisplay, groupStatuses } from '../utils/formatters';
 import { useDocumentTitle } from '../utils/useDocumentTitle';
 
 const PAGE_SIZE = 20;
@@ -36,12 +36,6 @@ const PHASE_OPTIONS = [
   { value: 'PHASE4', label: 'Phase 4' },
 ];
 
-const RECRUITING_STATUS_OPTIONS = [
-  { value: 'recruiting', label: 'Recruiting now' },
-  { value: 'not_recruiting', label: 'Not currently recruiting' },
-  { value: 'finished', label: 'Finished trials' },
-];
-
 const AGE_GROUP_OPTIONS = [
   { value: 'child', label: 'Child (Under 18)' },
   { value: 'adult', label: 'Adult (18–64)' },
@@ -51,11 +45,6 @@ const AGE_GROUP_OPTIONS = [
 const ADMIN_PHASE_OPTIONS = [
   { value: '', label: 'All phases' },
   ...PHASE_OPTIONS,
-];
-
-const ADMIN_RECRUITING_OPTIONS = [
-  { value: '', label: 'All statuses' },
-  ...RECRUITING_STATUS_OPTIONS,
 ];
 
 const SELECT_CLS = 'border border-line rounded-lg px-3 py-1.5 text-sm text-gray-700 bg-white shadow-sm cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand-100 focus:border-brand-400 transition-colors hover:border-gray-300';
@@ -167,6 +156,148 @@ function FilterSection({ title, children }: { title: string; children: ReactNode
   );
 }
 
+function CheckboxOption({
+  checked,
+  indeterminate = false,
+  label,
+  count,
+  onChange,
+  className = '',
+}: {
+  checked: boolean;
+  indeterminate?: boolean;
+  label: string;
+  count?: number;
+  onChange: () => void;
+  className?: string;
+}) {
+  return (
+    <label className={`flex items-start gap-2 text-sm text-gray-700 cursor-pointer py-0.5 ${className}`}>
+      <input
+        type="checkbox"
+        checked={checked}
+        ref={(el) => {
+          // Indeterminate is a DOM property, not an attribute — React cannot set it via JSX.
+          if (el) el.indeterminate = indeterminate && !checked;
+        }}
+        onChange={onChange}
+        className="accent-brand-600 mt-0.5 shrink-0"
+      />
+      <span>
+        {label}
+        {count !== undefined && <span className="text-gray-400"> ({count})</span>}
+      </span>
+    </label>
+  );
+}
+
+/**
+ * Two-level recruitment-status filter: plain-English groups that expand to the
+ * individual ClinicalTrials.gov statuses inside them.
+ *
+ * Only statuses present in `statuses` (the facet, i.e. what the visible trials
+ * actually have) are offered, and anything outside a known group is listed as a
+ * standalone option — so no trial can be unreachable through this filter.
+ */
+function StatusFilter({
+  statuses,
+  selected,
+  onChange,
+}: {
+  statuses: StatusFacet[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const { groups, ungrouped } = groupStatuses(statuses.map((s) => s.value));
+  const countOf = (value: string) => statuses.find((s) => s.value === value)?.count ?? 0;
+
+  const selectedSet = new Set(selected);
+  const toggleStatus = (value: string) =>
+    onChange(
+      selectedSet.has(value)
+        ? selected.filter((s) => s !== value)
+        : [...selected, value],
+    );
+
+  function toggleGroup(members: string[]) {
+    const allOn = members.every((s) => selectedSet.has(s));
+    onChange(
+      allOn
+        ? selected.filter((s) => !members.includes(s))
+        : [...selected.filter((s) => !members.includes(s)), ...members],
+    );
+  }
+
+  function toggleExpanded(key: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  return (
+    <div className="space-y-1">
+      <CheckboxOption
+        checked={selected.length === 0}
+        label="All statuses"
+        onChange={() => onChange([])}
+      />
+      {groups.map((group) => {
+        const isOpen = expanded.has(group.key);
+        const groupCount = group.statuses.reduce((sum, s) => sum + countOf(s), 0);
+        return (
+          <div key={group.key}>
+            <div className="flex items-start gap-1">
+              <button
+                type="button"
+                onClick={() => toggleExpanded(group.key)}
+                aria-expanded={isOpen}
+                aria-label={`${isOpen ? 'Collapse' : 'Expand'} ${group.label}`}
+                className="text-gray-400 hover:text-gray-600 mt-0.5 w-3 shrink-0 text-xs leading-5"
+              >
+                {isOpen ? '▾' : '▸'}
+              </button>
+              <CheckboxOption
+                checked={group.statuses.every((s) => selectedSet.has(s))}
+                indeterminate={group.statuses.some((s) => selectedSet.has(s))}
+                label={group.label}
+                count={groupCount}
+                onChange={() => toggleGroup(group.statuses)}
+              />
+            </div>
+            {isOpen && (
+              <div className="ml-4 pl-2 border-l border-line">
+                {group.statuses.map((status) => (
+                  <CheckboxOption
+                    key={status}
+                    checked={selectedSet.has(status)}
+                    label={getOverallStatusDisplay(status).label}
+                    count={countOf(status)}
+                    onChange={() => toggleStatus(status)}
+                    className="text-xs text-gray-600"
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {ungrouped.map((status) => (
+        <CheckboxOption
+          key={status}
+          checked={selectedSet.has(status)}
+          label={getOverallStatusDisplay(status).label}
+          count={countOf(status)}
+          onChange={() => toggleStatus(status)}
+        />
+      ))}
+    </div>
+  );
+}
+
 function RadioOption({
   name,
   value,
@@ -219,12 +350,13 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
   const [selectedIrrelevantId, setSelectedIrrelevantId] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Fetch facets once for filter dropdowns (public mode only)
+  // Fetch facets once for filter controls. Needed in both modes: the public
+  // sidebar and the admin status dropdown are both built from the statuses that
+  // actually exist. The endpoint is auth-aware, so admins get all trials'
+  // statuses while the public gets only approved ones.
   useEffect(() => {
-    if (!adminMode) {
-      getTrialFacets().then(setFacets).catch(console.error);
-    }
-  }, [adminMode]);
+    getTrialFacets().then(setFacets).catch(console.error);
+  }, []);
 
   // Fetch relevant trials whenever params change (always in public mode; relevant tab in admin)
   useEffect(() => {
@@ -270,6 +402,10 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
     setParams((p) => ({ ...p, q: undefined, page: 1 }));
     setIrrelevantParams((p) => ({ ...p, q: undefined, page: 1 }));
   }
+
+  const { groups: statusSelectGroups, ungrouped: statusSelectUngrouped } = groupStatuses(
+    facets?.statuses.map((s) => s.value) ?? [],
+  );
 
   const currentTotal = activeTab === 'irrelevant' ? irrelevantResponse?.total : response?.total;
   const totalPages = currentTotal !== undefined ? Math.ceil(currentTotal / PAGE_SIZE) : 1;
@@ -338,13 +474,25 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
               ))}
             </select>
           )}
-          {adminMode && activeTab === 'relevant' && (
+          {adminMode && activeTab === 'relevant' && facets && facets.statuses.length > 0 && (
             <select
               className={SELECT_CLS}
-              onChange={(e) => setFilter('recruiting_status', e.target.value)}
+              value={params.overall_status ?? ''}
+              onChange={(e) => setFilter('overall_status', e.target.value)}
             >
-              {ADMIN_RECRUITING_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
+              <option value="">All statuses</option>
+              {statusSelectGroups.map((group) => (
+                <optgroup key={group.key} label={group.label}>
+                  {/* Whole-group option first, then each status within it. Values are
+                      pipe-joined so they pass straight through to the API. */}
+                  <option value={group.statuses.join('|')}>All {group.label.toLowerCase()}</option>
+                  {group.statuses.map((s) => (
+                    <option key={s} value={s}>{getOverallStatusDisplay(s).label}</option>
+                  ))}
+                </optgroup>
+              ))}
+              {statusSelectUngrouped.map((s) => (
+                <option key={s} value={s}>{getOverallStatusDisplay(s).label}</option>
               ))}
             </select>
           )}
@@ -412,27 +560,17 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
 
             <div className="border-t border-line" />
 
-            <FilterSection title="Recruiting Status">
-              <div className="space-y-1">
-                <RadioOption
-                  name="recruiting_status"
-                  value=""
-                  checked={!params.recruiting_status}
-                  label="All statuses"
-                  onChange={() => setParams((p) => ({ ...p, recruiting_status: undefined, page: 1 }))}
+            {facets && facets.statuses.length > 0 && (
+              <FilterSection title="Recruiting Status">
+                <StatusFilter
+                  statuses={facets.statuses}
+                  selected={params.overall_status?.split('|').map((s) => s.trim()).filter(Boolean) ?? []}
+                  onChange={(next) =>
+                    setParams((p) => ({ ...p, overall_status: next.join('|') || undefined, page: 1 }))
+                  }
                 />
-                {RECRUITING_STATUS_OPTIONS.map((o) => (
-                  <RadioOption
-                    key={o.value}
-                    name="recruiting_status"
-                    value={o.value}
-                    checked={params.recruiting_status === o.value}
-                    label={o.label}
-                    onChange={(v) => setParams((p) => ({ ...p, recruiting_status: v, page: 1 }))}
-                  />
-                ))}
-              </div>
-            </FilterSection>
+              </FilterSection>
+            )}
 
             <div className="border-t border-line" />
 
@@ -458,11 +596,11 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
               </div>
             </FilterSection>
 
-            {(params.phase || params.recruiting_status || params.age_group || params.country) && (
+            {(params.phase || params.overall_status || params.age_group || params.country) && (
               <>
                 <div className="border-t border-line" />
                 <button
-                  onClick={() => setParams((p) => ({ ...p, phase: undefined, recruiting_status: undefined, age_group: undefined, country: undefined, page: 1 }))}
+                  onClick={() => setParams((p) => ({ ...p, phase: undefined, overall_status: undefined, age_group: undefined, country: undefined, page: 1 }))}
                   className="text-xs font-medium text-brand-600 hover:text-brand-700 bg-brand-50 hover:bg-brand-100 px-2.5 py-1 rounded-full transition-colors"
                 >
                   Clear filters
