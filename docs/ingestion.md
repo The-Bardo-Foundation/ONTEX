@@ -181,14 +181,20 @@ After the audit row is committed, the same summary dict that is emitted as the f
 The step is skipped silently, in this order, when:
 
 1. `RESEND_API_KEY` is unset — keeps local development friction-free.
-2. No Clerk user has opted in, or the Clerk lookup failed.
-3. `INGESTION_SUMMARY_FROM` is unset.
+2. `INGESTION_SUMMARY_FROM` is unset.
+3. No Clerk user has opted in, or the Clerk lookup failed.
+
+Both config checks deliberately run **before** the Clerk lookup, so an unconfigured deployment does not make a pointless authenticated API call on every run.
 
 The recipient lookup is capped at 500 users (Clerk's per-page maximum) and is **not** paginated; revisit if the Clerk instance ever approaches that many users.
 
-Both terminal paths send: the normal end-of-run summary, and the early "no trials to process" exit. Note that the two paths emit slightly different key sets, so the emails are not identical tables.
+**One email is sent per recipient**, rather than a single message with a shared `to` list. Admins are therefore not exposed to each other's addresses, and one undeliverable address cannot block the rest — each send is tried and logged independently.
+
+Both terminal paths send — the normal end-of-run summary and the early "no trials to process" exit — and both emit the same key set, so the two emails render identical tables. In the early-exit path the `new`/`updated`/`reevaluated` counts are *candidates identified*, not work completed: that branch is also reached when every fetch failed, which is why the email keeps `fetch_errors` and shows the run label as a subtitle.
 
 Resend is a runtime-optional dependency — it is imported inside the send function, so the package is only needed when an API key is actually configured.
+
+**This step cannot fail the run.** Every path — the Clerk lookup, response parsing, and each individual send — is wrapped so nothing propagates. That is load-bearing rather than merely defensive: `run_daily_ingestion` awaits the send unguarded after the run is committed, and the ingestion endpoint turns any escaping exception into `_ingestion_status["error"]`, which would report a fully successful run as failed in the admin UI. See [tests/test_notifications.py](../tests/test_notifications.py).
 
 ---
 
@@ -233,10 +239,8 @@ Schema: [app/db/models.py](../app/db/models.py)
 | 4 — AI classify | LLM error after retries | Trial skipped (no row written), refetched next run; logged as `classify_errors` |
 | 5 — AI summarise | LLM error after retries | `custom_*` fields left `None`; pipeline continues |
 | 6 — DB upsert | SQL error | Exception propagates; run aborted |
-| 8 — Email summary | Resend send fails | Caught and logged as a warning; run already committed, so the result is unaffected |
-| 8 — Email summary | Clerk recipient lookup fails | HTTP/network errors are caught and treated as "no recipients". Note: a malformed Clerk response is *not* currently caught — see below |
-
-> **Known gap.** In `get_summary_email_recipients()` the `try`/`except` wraps only the HTTP call, not the loop that parses the response. A `null` `email_addresses` field or a non-list response body therefore raises out of the step. Because `run_daily_ingestion` awaits the email send unguarded, that exception surfaces as `_ingestion_status["error"]` and the admin UI reports the run as **failed** even though every trial was committed successfully. This contradicts the "email must never break ingestion" contract both modules document.
+| 8 — Email summary | Resend send fails | Caught and logged per recipient; remaining recipients still receive the email. Run already committed, so the result is unaffected |
+| 8 — Email summary | Clerk lookup fails, or returns a malformed body | Caught and treated as "no recipients"; the step is skipped and the run reports success |
 
 ---
 

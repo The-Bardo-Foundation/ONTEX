@@ -34,8 +34,10 @@ _USER_LIMIT = 500
 def _primary_email(user: dict[str, Any]) -> str | None:
     """Return the user's primary email address, or None if not resolvable."""
     primary_id = user.get("primary_email_address_id")
-    for entry in user.get("email_addresses", []):
-        if entry.get("id") == primary_id:
+    # `or []` rather than a .get default: Clerk may send the key with a null
+    # value, and a default only applies when the key is absent entirely.
+    for entry in user.get("email_addresses") or []:
+        if isinstance(entry, dict) and entry.get("id") == primary_id:
             return entry.get("email_address")
     return None
 
@@ -62,6 +64,9 @@ async def get_summary_email_recipients() -> list[str]:
     headers = {"Authorization": f"Bearer {settings.CLERK_SECRET_KEY}"}
     params = {"limit": _USER_LIMIT}
 
+    # The parsing below is inside the same try as the request on purpose: an
+    # unexpected response shape is just as much a "Clerk failed" case as a
+    # network error, and this function must never raise into the pipeline.
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.get(
@@ -69,17 +74,26 @@ async def get_summary_email_recipients() -> list[str]:
             )
             response.raise_for_status()
             users = response.json()
-    except Exception as exc:  # noqa: BLE001 — failure must never break ingestion
-        logger.warning("Failed to fetch Clerk users: %s", exc)
-        return []
 
-    recipients: list[str] = []
-    for user in users:
-        if not _is_opted_in(user):
-            continue
-        email = _primary_email(user)
-        if email:
-            recipients.append(email)
+        if not isinstance(users, list):
+            logger.warning(
+                "Unexpected Clerk /users response type (%s) — expected a list",
+                type(users).__name__,
+            )
+            return []
+
+        recipients: list[str] = []
+        for user in users:
+            if not isinstance(user, dict):
+                continue
+            if not _is_opted_in(user):
+                continue
+            email = _primary_email(user)
+            if email:
+                recipients.append(email)
+    except Exception as exc:  # noqa: BLE001 — failure must never break ingestion
+        logger.warning("Failed to resolve Clerk summary recipients: %s", exc)
+        return []
 
     # Dedupe while preserving order.
     seen: set[str] = set()

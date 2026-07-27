@@ -249,7 +249,8 @@ A separate **All Trials** page (existing Approved/Rejected tabs):
 - New SSE endpoint `GET /api/v1/ingestion/run-stream` — streams step-by-step progress
 - `IngestionProgressModal` component with per-step progress bars and final summary
 - **Daily ingestion summary email** (Step 8 of the pipeline): after each run the summary counts are emailed via Resend. Skipped silently when `RESEND_API_KEY`/`INGESTION_SUMMARY_FROM` are unset or nobody has opted in. See [docs/ingestion.md](docs/ingestion.md).
-- Summary recipients are resolved per run from Clerk users (opt-in via `unsafeMetadata.emailIngestionSummary`) rather than a static env var. Toggle lives in `<UserButton/>` → Notifications. Default is opted-OUT.
+- Summary recipients are resolved per run from Clerk users (opt-in via `unsafeMetadata.emailIngestionSummary`) rather than a static env var. Toggle lives in `<UserButton/>` → Notifications. Default is opted-OUT. One email is sent per recipient, so addresses are never shared between admins.
+- Step 8 is fully non-fatal: Clerk lookup, response parsing and each send are individually guarded, because the pipeline awaits the send unguarded after committing. Covered by `tests/test_notifications.py` (30 tests).
 
 #### Remaining in Phase 4
 
@@ -257,7 +258,6 @@ A separate **All Trials** page (existing Approved/Rejected tabs):
 - Test sign-in flow end-to-end in staging environment
 - Clerk invite flow for additional reviewers (lower priority)
 - Role-based access control (Admin vs. Reviewer) via Clerk public metadata
-- **Harden Step 8 recipient lookup**: the `try`/`except` in `get_summary_email_recipients()` covers only the HTTP call, so a malformed Clerk response (e.g. `email_addresses: null`) raises out of the unguarded email send and makes a fully-successful run report as failed in the admin UI. Also add test coverage for the opt-in filter — there is none today.
 
 ---
 

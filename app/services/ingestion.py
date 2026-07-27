@@ -212,6 +212,11 @@ async def run_daily_ingestion(
                 fetch_errors=fetch_errors,
             ))
             await db.commit()
+        # Same key set as final_summary below so both terminal paths produce an
+        # identical email table. The new/updated/reevaluated counts here are
+        # candidates identified, not work completed — this branch is also
+        # reached when every fetch failed, which `fetch_errors` and the label
+        # make visible.
         empty_summary = {
             "step": "complete",
             "label": "Done — no trials to process",
@@ -219,8 +224,11 @@ async def run_daily_ingestion(
             "candidates_found": len(all_candidates),
             "new": len(new_trials),
             "updated": len(updated_trials),
+            "skipped_unchanged": 0,
             "reevaluated": len(reeval_list),
             "relevant": 0,
+            "auto_approved": 0,
+            "pending_review": 0,
             "irrelevant": 0,
             "fetch_errors": fetch_errors,
             "classify_errors": 0,

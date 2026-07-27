@@ -14,16 +14,23 @@ Recipient resolution:
   account page.
 
 Behaviour:
-- If `settings.RESEND_API_KEY` is empty/unset, the function logs a debug
-  message and returns silently. This keeps local development friction-free
-  for developers who don't have email credentials.
+- If `settings.RESEND_API_KEY` or `settings.INGESTION_SUMMARY_FROM` is
+  empty/unset, the function logs and returns before contacting Clerk. Both
+  are checked up front so an unconfigured deployment does not make a pointless
+  authenticated API call on every run. This also keeps local development
+  friction-free for developers who don't have email credentials.
 - If no Clerk user has opted in (or the Clerk lookup fails), the function
   logs and returns without sending — an empty recipient list must never
   raise.
-- The send is performed in a thread pool via `asyncio.to_thread` because
+- One email is sent per recipient rather than a single message with a shared
+  `to` list, so admins are not exposed to each other's addresses and one bad
+  address cannot block delivery to everyone else.
+- Each send is performed in a thread pool via `asyncio.to_thread` because
   the `resend` SDK is synchronous and would otherwise block the event loop.
-- All exceptions raised by Resend are caught and logged. A failed summary
-  email must not break or roll back the ingestion run.
+- Every failure path is caught and logged. `run_daily_ingestion` awaits this
+  function unguarded after the run is already committed, so anything escaping
+  here would surface as `_ingestion_status["error"]` and report a fully
+  successful run as failed.
 """
 
 from __future__ import annotations
@@ -39,16 +46,44 @@ from app.services.clerk import get_summary_email_recipients
 logger = logging.getLogger(__name__)
 
 
+# Keys that carry progress-stream plumbing rather than run results. `step` is
+# always the literal "complete" here, and `label` is promoted to the subtitle
+# instead of being rendered as a table row.
+_INTERNAL_KEYS = {"step", "label"}
+
+
+def _humanise(key: str) -> str:
+    """`skipped_unchanged` → `Skipped unchanged`."""
+    return key.replace("_", " ").capitalize()
+
+
+def _format_value(value: Any) -> str:
+    """Render a summary value readably — lists as prose, not Python reprs."""
+    if isinstance(value, (list, tuple)):
+        return ", ".join(str(v) for v in value) if value else "—"
+    return str(value)
+
+
 def _format_html(summary: dict[str, Any]) -> str:
     """Render the summary dict as a small HTML table for the email body."""
     rows = "".join(
-        f"<tr><td style='padding:4px 12px 4px 0'>{html.escape(str(k))}</td>"
-        f"<td style='padding:4px 0'><strong>{html.escape(str(v))}</strong></td></tr>"
+        f"<tr><td style='padding:4px 12px 4px 0'>{html.escape(_humanise(k))}</td>"
+        f"<td style='padding:4px 0'><strong>{html.escape(_format_value(v))}</strong></td></tr>"
         for k, v in summary.items()
+        if k not in _INTERNAL_KEYS
+    )
+    # `label` distinguishes a normal run from the "no trials to process" exit,
+    # which matters because the counts below are candidates found, not work done.
+    subtitle = summary.get("label")
+    subtitle_html = (
+        f"<p style='margin:0 0 12px 0;color:#555'>{html.escape(str(subtitle))}</p>"
+        if subtitle
+        else ""
     )
     return (
         "<div style='font-family:system-ui,sans-serif;font-size:14px'>"
-        "<h2 style='margin:0 0 12px 0'>Daily ingestion summary</h2>"
+        "<h2 style='margin:0 0 4px 0'>Daily ingestion summary</h2>"
+        f"{subtitle_html}"
         f"<table style='border-collapse:collapse'>{rows}</table>"
         "</div>"
     )
@@ -69,15 +104,10 @@ async def send_ingestion_summary(summary: dict[str, Any]) -> None:
     `summary` is the same dict shape that the pipeline emits on its final
     `step: complete` progress event (counts of new/updated/relevant/etc).
     """
+    # Both config guards run before the Clerk lookup: they are free to check,
+    # and bailing afterwards would waste an authenticated API call every run.
     if not settings.RESEND_API_KEY:
         logger.debug("RESEND_API_KEY not set — skipping ingestion summary email")
-        return
-
-    recipients = await get_summary_email_recipients()
-    if not recipients:
-        logger.debug(
-            "No Clerk users opted in to ingestion summary — skipping email"
-        )
         return
 
     if not settings.INGESTION_SUMMARY_FROM:
@@ -86,18 +116,44 @@ async def send_ingestion_summary(summary: dict[str, Any]) -> None:
         )
         return
 
-    payload = {
-        "from": settings.INGESTION_SUMMARY_FROM,
-        "to": recipients,
-        "subject": "ONTEX — daily ingestion summary",
-        "html": _format_html(summary),
-    }
-
+    # get_summary_email_recipients() already swallows its own failures, but it
+    # is awaited defensively here too: this function is called unguarded at the
+    # end of run_daily_ingestion, so anything escaping would mark an otherwise
+    # successful run as failed in the admin UI.
     try:
-        result = await asyncio.to_thread(_send_sync, payload)
-        logger.info("Ingestion summary email sent (resend response=%s)", result)
-    except Exception as exc:  # noqa: BLE001 — email failure must never break ingestion
-        logger.warning("Failed to send ingestion summary email: %s", exc)
+        recipients = await get_summary_email_recipients()
+    except Exception as exc:  # noqa: BLE001 — must never break ingestion
+        logger.warning("Failed to resolve ingestion summary recipients: %s", exc)
+        return
+
+    if not recipients:
+        logger.debug(
+            "No Clerk users opted in to ingestion summary — skipping email"
+        )
+        return
+
+    body = _format_html(summary)
+
+    # One email per recipient rather than a shared `to` list, so admins are not
+    # exposed to each other's addresses and one bad address cannot block the
+    # rest. The list is a handful of people, so the extra calls are cheap.
+    sent = 0
+    for recipient in recipients:
+        payload = {
+            "from": settings.INGESTION_SUMMARY_FROM,
+            "to": [recipient],
+            "subject": "ONTEX — daily ingestion summary",
+            "html": body,
+        }
+        try:
+            await asyncio.to_thread(_send_sync, payload)
+            sent += 1
+        except Exception as exc:  # noqa: BLE001 — email failure must never break ingestion
+            logger.warning(
+                "Failed to send ingestion summary email to %s: %s", recipient, exc
+            )
+
+    logger.info("Ingestion summary email sent to %d/%d recipient(s)", sent, len(recipients))
 
 
 if __name__ == "__main__":
