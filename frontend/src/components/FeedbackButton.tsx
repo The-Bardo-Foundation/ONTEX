@@ -35,13 +35,14 @@ export function FeedbackButton() {
   return (
     <div
       ref={containerRef}
-      className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3"
+      className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-50 flex flex-col items-end gap-3"
     >
       {open && (
         <div
           role="dialog"
           aria-label="Feedback options"
-          className="w-80 rounded-lg border border-line bg-white p-4 shadow-xl"
+          // 20rem, but never wider than the viewport allows once both insets are paid for.
+          className="w-[min(20rem,calc(100vw-2rem))] rounded-lg border border-line bg-white p-4 shadow-xl"
         >
           <div className="mb-3">
             <h2 className="text-sm font-semibold text-gray-900">
@@ -87,12 +88,18 @@ export function FeedbackButton() {
         </div>
       )}
 
+      {/*
+        Icon-only on a phone. The label is worth its width on a desktop, but a
+        pill wide enough to read sits across the trials list's pagination
+        controls at mobile widths.
+      */}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="dialog"
-        className="flex items-center gap-2 rounded-full bg-brand-600 px-4 py-2.5 text-sm font-medium text-white shadow-lg transition hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
+        aria-label="Feedback"
+        className="flex items-center gap-2 rounded-full bg-brand-600 p-3 text-sm font-medium text-white shadow-lg transition hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 sm:px-4 sm:py-2.5"
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -107,7 +114,7 @@ export function FeedbackButton() {
             clipRule="evenodd"
           />
         </svg>
-        Feedback
+        <span className="hidden sm:inline">Feedback</span>
       </button>
     </div>
   );

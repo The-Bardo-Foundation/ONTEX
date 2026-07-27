@@ -326,6 +326,105 @@ function RadioOption({
   );
 }
 
+/**
+ * The public filter controls, shared by the desktop sidebar and the mobile
+ * filter sheet.
+ *
+ * `namePrefix` keeps the two copies' radio groups apart. The sidebar is hidden
+ * with `display:none` rather than unmounted, so both copies are always in the
+ * DOM and identically named radios would otherwise form one browser-level
+ * group.
+ */
+function PublicFilters({
+  facets,
+  params,
+  setFilters,
+  selectedStatuses,
+  onStatusesChange,
+  namePrefix,
+}: {
+  facets: TrialFacets | null;
+  params: GetTrialsParams;
+  setFilters: (patch: Partial<GetTrialsParams>) => void;
+  selectedStatuses: string[];
+  onStatusesChange: (next: string[]) => void;
+  namePrefix: string;
+}) {
+  return (
+    <>
+      {facets && facets.countries.length > 0 && (
+        <FilterSection title="Country">
+          <CountryCombobox
+            countries={facets.countries}
+            value={params.country}
+            onChange={(c) => setFilters({ country: c })}
+          />
+        </FilterSection>
+      )}
+
+      <div className="border-t border-line" />
+
+      <FilterSection title="Age">
+        <div className="space-y-1">
+          <RadioOption
+            name={`${namePrefix}-age_group`}
+            value=""
+            checked={!params.age_group}
+            label="All ages"
+            onChange={() => setFilters({ age_group: undefined })}
+          />
+          {AGE_GROUP_OPTIONS.map((o) => (
+            <RadioOption
+              key={o.value}
+              name={`${namePrefix}-age_group`}
+              value={o.value}
+              checked={params.age_group === o.value}
+              label={o.label}
+              onChange={(v) => setFilters({ age_group: v })}
+            />
+          ))}
+        </div>
+      </FilterSection>
+
+      <div className="border-t border-line" />
+
+      {facets && facets.statuses.length > 0 && (
+        <FilterSection title="Recruiting Status">
+          <StatusFilter
+            statuses={facets.statuses}
+            selected={selectedStatuses}
+            onChange={onStatusesChange}
+          />
+        </FilterSection>
+      )}
+
+      <div className="border-t border-line" />
+
+      <FilterSection title="Trial Phase">
+        <div className="space-y-1">
+          <RadioOption
+            name={`${namePrefix}-phase`}
+            value=""
+            checked={!params.phase}
+            label="All phases"
+            onChange={() => setFilters({ phase: undefined })}
+          />
+          {PHASE_OPTIONS.map((o) => (
+            <RadioOption
+              key={o.value}
+              name={`${namePrefix}-phase`}
+              value={o.value}
+              checked={params.phase === o.value}
+              label={o.label}
+              onChange={(v) => setFilters({ phase: v })}
+            />
+          ))}
+        </div>
+      </FilterSection>
+    </>
+  );
+}
+
 export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
   useDocumentTitle(adminMode ? 'All Trials' : 'Search Trials');
 
@@ -348,6 +447,8 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
   });
   const [searchInput, setSearchInput] = useState('');
   const [selectedIrrelevantId, setSelectedIrrelevantId] = useState<string | null>(null);
+  // Below `md` the filter sidebar has no room, so it moves into a sheet.
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch facets once for filter controls. Needed in both modes: the public
@@ -403,9 +504,88 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
     setIrrelevantParams((p) => ({ ...p, q: undefined, page: 1 }));
   }
 
+  // Close the filter sheet on Escape, matching the modals elsewhere in the app.
+  useEffect(() => {
+    if (!filtersOpen) return;
+    function handleEscape(e: KeyboardEvent) {
+      if (e.key === 'Escape') setFiltersOpen(false);
+    }
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [filtersOpen]);
+
   const { groups: statusSelectGroups, ungrouped: statusSelectUngrouped } = groupStatuses(
     facets?.statuses.map((s) => s.value) ?? [],
   );
+
+  /** Any filter change resets to page 1 — the old page number rarely still exists. */
+  function setFilters(patch: Partial<GetTrialsParams>) {
+    setParams((p) => ({ ...p, ...patch, page: 1 }));
+  }
+
+  const selectedStatuses =
+    params.overall_status?.split('|').map((s) => s.trim()).filter(Boolean) ?? [];
+
+  function setStatuses(next: string[]) {
+    setFilters({ overall_status: next.join('|') || undefined });
+  }
+
+  function clearFilters() {
+    setFilters({ phase: undefined, overall_status: undefined, age_group: undefined, country: undefined });
+  }
+
+  const hasActiveFilters = Boolean(
+    params.phase || params.overall_status || params.age_group || params.country,
+  );
+
+  /*
+   * Active filters as individually removable chips. Only shown below `md`,
+   * where the sidebar is hidden and this is the sole indication of what is
+   * narrowing the results.
+   *
+   * Statuses collapse back to their group label when every member of a group is
+   * selected — ticking "Finished trials" selects six statuses, and six chips for
+   * one tap would bury the rest.
+   */
+  const activeFilters: { key: string; label: string; remove: () => void }[] = [];
+  if (params.country) {
+    const country = params.country;
+    activeFilters.push({ key: 'country', label: country, remove: () => setFilters({ country: undefined }) });
+  }
+  if (params.age_group) {
+    const value = params.age_group;
+    activeFilters.push({
+      key: 'age_group',
+      label: AGE_GROUP_OPTIONS.find((o) => o.value === value)?.label ?? value,
+      remove: () => setFilters({ age_group: undefined }),
+    });
+  }
+  const looseStatuses = new Set(selectedStatuses);
+  for (const group of statusSelectGroups) {
+    if (group.statuses.length > 1 && group.statuses.every((s) => looseStatuses.has(s))) {
+      group.statuses.forEach((s) => looseStatuses.delete(s));
+      activeFilters.push({
+        key: `status-${group.key}`,
+        label: group.label,
+        remove: () => setStatuses(selectedStatuses.filter((s) => !group.statuses.includes(s))),
+      });
+    }
+  }
+  for (const status of looseStatuses) {
+    activeFilters.push({
+      key: `status-${status}`,
+      label: getOverallStatusDisplay(status).label,
+      remove: () => setStatuses(selectedStatuses.filter((s) => s !== status)),
+    });
+  }
+  if (params.phase) {
+    const value = params.phase;
+    activeFilters.push({
+      key: 'phase',
+      label: PHASE_OPTIONS.find((o) => o.value === value)?.label ?? value,
+      remove: () => setFilters({ phase: undefined }),
+    });
+  }
 
   const currentTotal = activeTab === 'irrelevant' ? irrelevantResponse?.total : response?.total;
   const totalPages = currentTotal !== undefined ? Math.ceil(currentTotal / PAGE_SIZE) : 1;
@@ -414,7 +594,7 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header bar */}
-      <div className="px-6 py-4 border-b bg-white space-y-3">
+      <div className="px-4 sm:px-6 py-3 sm:py-4 border-b bg-white space-y-2.5 sm:space-y-3">
         <div className="flex items-center justify-between">
           <h1 className="text-base font-semibold text-gray-700">
             {adminMode ? 'All Trials' : 'Clinical Trials'}
@@ -443,7 +623,7 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
           onChange={(e) => handleSearchChange(e.target.value)}
           className="w-full border border-gray-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
         />
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
           {adminMode && activeTab === 'relevant' && (
             <select
               className={SELECT_CLS}
@@ -497,7 +677,7 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
             </select>
           )}
           <select
-            className={SELECT_CLS}
+            className={`${SELECT_CLS}${adminMode ? '' : ' flex-1 min-w-0 md:flex-none'}`}
             defaultValue="last_update_post_date"
             onChange={(e) => {
               if (activeTab === 'irrelevant') {
@@ -511,96 +691,74 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </select>
+          {!adminMode && (
+            <button
+              type="button"
+              onClick={() => setFiltersOpen(true)}
+              className="md:hidden relative shrink-0 flex items-center gap-1.5 border border-line rounded-lg bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:border-gray-300"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 6h16M7 12h10M10 18h4" />
+              </svg>
+              Filters
+              {activeFilters.length > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-brand-600 px-1 text-[10px] font-bold text-white">
+                  {activeFilters.length}
+                </span>
+              )}
+            </button>
+          )}
           {currentTotal !== undefined && (
             <span className="text-xs text-gray-400 ml-auto">
               {currentTotal} trial{currentTotal !== 1 ? 's' : ''}
             </span>
           )}
         </div>
+
+        {/* Active-filter chips — the only trace of the hidden sidebar below `md`. */}
+        {!adminMode && activeFilters.length > 0 && (
+          <div className="md:hidden flex flex-wrap gap-1.5">
+            {activeFilters.map((filter) => (
+              <span
+                key={filter.key}
+                className="inline-flex items-center gap-1 rounded-full bg-brand-50 py-1 pl-2.5 pr-1.5 text-xs font-medium text-brand-700"
+              >
+                {filter.label}
+                <button
+                  type="button"
+                  onClick={filter.remove}
+                  aria-label={`Remove ${filter.label} filter`}
+                  className="p-0.5 text-brand-600 hover:text-brand-800"
+                >
+                  <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3} strokeLinecap="round">
+                    <path d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Content area: filter sidebar (public only) + trial list */}
       <div className={`flex flex-1 overflow-hidden ${!adminMode ? 'flex-row' : 'flex-col'}`}>
-        {/* Filter sidebar — public mode only */}
+        {/* Filter sidebar — public mode only, and only where 208px can be spared */}
         {!adminMode && (
-          <aside className="w-52 shrink-0 border-r bg-surface overflow-y-auto p-4 space-y-5">
-            {facets && facets.countries.length > 0 && (
-              <FilterSection title="Country">
-                <CountryCombobox
-                  countries={facets.countries}
-                  value={params.country}
-                  onChange={(c) => setParams((p) => ({ ...p, country: c, page: 1 }))}
-                />
-              </FilterSection>
-            )}
+          <aside className="hidden md:block w-52 shrink-0 border-r bg-surface overflow-y-auto p-4 space-y-5">
+            <PublicFilters
+              facets={facets}
+              params={params}
+              setFilters={setFilters}
+              selectedStatuses={selectedStatuses}
+              onStatusesChange={setStatuses}
+              namePrefix="sidebar"
+            />
 
-            <div className="border-t border-line" />
-
-            <FilterSection title="Age">
-              <div className="space-y-1">
-                <RadioOption
-                  name="age_group"
-                  value=""
-                  checked={!params.age_group}
-                  label="All ages"
-                  onChange={() => setParams((p) => ({ ...p, age_group: undefined, page: 1 }))}
-                />
-                {AGE_GROUP_OPTIONS.map((o) => (
-                  <RadioOption
-                    key={o.value}
-                    name="age_group"
-                    value={o.value}
-                    checked={params.age_group === o.value}
-                    label={o.label}
-                    onChange={(v) => setParams((p) => ({ ...p, age_group: v, page: 1 }))}
-                  />
-                ))}
-              </div>
-            </FilterSection>
-
-            <div className="border-t border-line" />
-
-            {facets && facets.statuses.length > 0 && (
-              <FilterSection title="Recruiting Status">
-                <StatusFilter
-                  statuses={facets.statuses}
-                  selected={params.overall_status?.split('|').map((s) => s.trim()).filter(Boolean) ?? []}
-                  onChange={(next) =>
-                    setParams((p) => ({ ...p, overall_status: next.join('|') || undefined, page: 1 }))
-                  }
-                />
-              </FilterSection>
-            )}
-
-            <div className="border-t border-line" />
-
-            <FilterSection title="Trial Phase">
-              <div className="space-y-1">
-                <RadioOption
-                  name="phase"
-                  value=""
-                  checked={!params.phase}
-                  label="All phases"
-                  onChange={() => setParams((p) => ({ ...p, phase: undefined, page: 1 }))}
-                />
-                {PHASE_OPTIONS.map((o) => (
-                  <RadioOption
-                    key={o.value}
-                    name="phase"
-                    value={o.value}
-                    checked={params.phase === o.value}
-                    label={o.label}
-                    onChange={(v) => setParams((p) => ({ ...p, phase: v, page: 1 }))}
-                  />
-                ))}
-              </div>
-            </FilterSection>
-
-            {(params.phase || params.overall_status || params.age_group || params.country) && (
+            {hasActiveFilters && (
               <>
                 <div className="border-t border-line" />
                 <button
-                  onClick={() => setParams((p) => ({ ...p, phase: undefined, overall_status: undefined, age_group: undefined, country: undefined, page: 1 }))}
+                  onClick={clearFilters}
                   className="text-xs font-medium text-brand-600 hover:text-brand-700 bg-brand-50 hover:bg-brand-100 px-2.5 py-1 rounded-full transition-colors"
                 >
                   Clear filters
@@ -637,7 +795,7 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
                           setSelectedIrrelevantId(trial.nct_id);
                         }
                       }}
-                      className="px-6 py-4 hover:bg-surface cursor-pointer transition-colors"
+                      className="px-4 sm:px-6 py-4 hover:bg-surface cursor-pointer transition-colors"
                     >
                       <p className="text-sm font-semibold text-gray-900 leading-snug mb-1">
                         {trial.brief_title}
@@ -688,13 +846,14 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
                   <li
                     key={trial.nct_id}
                     onClick={() => navigate(`/trials/${trial.nct_id}`)}
-                    className="px-6 py-4 hover:bg-surface cursor-pointer transition-colors"
+                    className="px-4 sm:px-6 py-4 hover:bg-surface cursor-pointer transition-colors"
                   >
-                    <p className="text-sm font-semibold text-gray-900 leading-snug mb-1">
+                    {/* A touch target's worth of type on a phone; the desktop density is unchanged. */}
+                    <p className="text-[0.9375rem] sm:text-sm font-semibold text-gray-900 leading-snug mb-1">
                       {trial.brief_title}
                     </p>
                     {summary && (
-                      <p className="text-xs text-gray-500 leading-relaxed mb-2 line-clamp-2">
+                      <p className="text-[0.8125rem] sm:text-xs text-gray-500 leading-relaxed mb-2 line-clamp-2">
                         {summary}
                       </p>
                     )}
@@ -727,9 +886,12 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
         </div>
       </div>
 
-      {/* Pagination */}
+      {/*
+        Pagination sits left on a phone: the feedback button floats over the
+        bottom-right corner, and right-aligned controls put "Next" underneath it.
+      */}
       {totalPages > 1 && (
-        <div className="px-6 py-3 border-t bg-white flex items-center justify-end gap-3">
+        <div className="px-4 sm:px-6 py-3 border-t bg-white flex items-center justify-start sm:justify-end gap-2 sm:gap-3">
           <button
             disabled={currentPage === 1}
             onClick={() => {
@@ -739,11 +901,11 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
                 setParams((p) => ({ ...p, page: (p.page ?? 1) - 1 }));
               }
             }}
-            className="px-4 py-1.5 text-sm font-medium text-gray-700 bg-white border border-line rounded-lg shadow-sm hover:bg-surface hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-medium text-gray-700 bg-white border border-line rounded-lg shadow-sm hover:bg-surface hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             Previous
           </button>
-          <span className="text-sm text-gray-400">
+          <span className="text-xs sm:text-sm text-gray-400 whitespace-nowrap">
             Page {currentPage} of {totalPages}
           </span>
           <button
@@ -755,10 +917,71 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
                 setParams((p) => ({ ...p, page: (p.page ?? 1) + 1 }));
               }
             }}
-            className="px-4 py-1.5 text-sm font-medium text-gray-700 bg-white border border-line rounded-lg shadow-sm hover:bg-surface hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-medium text-gray-700 bg-white border border-line rounded-lg shadow-sm hover:bg-surface hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             Next
           </button>
+        </div>
+      )}
+
+      {/*
+        Mobile filter sheet — the sidebar's contents, slid up from the bottom.
+        It sits above z-50 because the feedback button is fixed at z-50 and
+        rendered after <main>, so anything lower lets that button float over
+        the sheet's backdrop.
+      */}
+      {!adminMode && filtersOpen && (
+        <div className="md:hidden fixed inset-0 z-[60]" role="dialog" aria-label="Filters">
+          <div
+            className="absolute inset-0 bg-gray-900/40"
+            onClick={() => setFiltersOpen(false)}
+          />
+          <div className="absolute inset-x-0 bottom-0 max-h-[85%] flex flex-col bg-white rounded-t-2xl shadow-2xl animate-sheet-up">
+            <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-line-soft">
+              <h2 className="text-sm font-semibold text-gray-900">Filters</h2>
+              <button
+                type="button"
+                onClick={() => setFiltersOpen(false)}
+                aria-label="Close filters"
+                className="p-1 text-gray-400 hover:text-gray-600"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+                  <path d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-5">
+              <PublicFilters
+                facets={facets}
+                params={params}
+                setFilters={setFilters}
+                selectedStatuses={selectedStatuses}
+                onStatusesChange={setStatuses}
+                namePrefix="sheet"
+              />
+            </div>
+
+            <div className="shrink-0 flex items-center gap-3 px-4 py-3 border-t border-line-soft">
+              <button
+                type="button"
+                onClick={clearFilters}
+                disabled={!hasActiveFilters}
+                className="shrink-0 px-1 py-2 text-sm font-medium text-brand-600 disabled:text-gray-300"
+              >
+                Clear all
+              </button>
+              <button
+                type="button"
+                onClick={() => setFiltersOpen(false)}
+                className="flex-1 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-700"
+              >
+                {currentTotal === undefined
+                  ? 'Show results'
+                  : `Show ${currentTotal} result${currentTotal !== 1 ? 's' : ''}`}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

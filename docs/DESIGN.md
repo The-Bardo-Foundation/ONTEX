@@ -67,12 +67,47 @@ That is the one intentional `blue-*` left in the codebase.
 - **No emoji as iconography**, and no text glyphs (`▾`, `→`) used as UI chrome.
 - **Muted chips.** The three classification labels are soft tints (`accent-50`,
   `brand-50`, `surface-muted`), not saturated pills.
-- **The public header stays on one row.** Logo left, nav links right, down to 320px.
-  The links hold their intrinsic width (`shrink-0`, `whitespace-nowrap`) and the logo
-  is the flexible element — `min-w-0` on its link plus `max-w-full` on the image lets
-  it scale below `max-h-7` when space runs out. Don't add `flex-wrap` back: a wrapped
+- **The public header stays on one row.** Logo left, nav right, down to 320px. From
+  `sm` up the links sit inline and hold their intrinsic width (`shrink-0`,
+  `whitespace-nowrap`) while the logo is the flexible element — `min-w-0` on its link
+  plus `max-w-full` on the image lets it scale below `max-h-7` when space runs out.
+  Below `sm` the links collapse behind a menu button, because two labels plus the logo
+  on a 360px screen leaves the logo unreadable. Don't add `flex-wrap` back: a wrapped
   header pushes the nav onto a second row on a phone, and letting the logo win instead
   forces horizontal scroll on every page.
+
+## Mobile
+
+The public viewer is expected to work from 320px up. Three rules carry most of it.
+
+- **Full-height means `min-h-screen-dynamic`, not `min-h-screen`.** On a phone `100vh`
+  is the viewport *without* the browser chrome, so an internally scrolled page (the
+  trials list) renders its pagination bar below the fold until the URL bar collapses.
+  The utility in [`src/index.css`](../frontend/src/index.css) declares `100vh` then
+  `100dvh`, in that order, as a real CSS fallback. It cannot be spelled
+  `min-h-screen min-h-dvh` in the markup — Tailwind emits `min-h-dvh` *before*
+  `min-h-screen`, so the `vh` rule would win and the class would silently do nothing.
+- **The filter sidebar becomes a bottom sheet below `md`.** 208px of sidebar next to a
+  360px screen leaves nothing for trial titles. The controls themselves are shared, not
+  duplicated: `PublicFilters` in
+  [`AllTrialsPage.tsx`](../frontend/src/pages/AllTrialsPage.tsx) renders in both places.
+  Both copies are in the DOM at once (the sidebar is hidden with `display:none`, not
+  unmounted), which is why that component takes a `namePrefix` — identically named
+  radios would otherwise form a single browser-level group.
+- **Hiding the sidebar needs a replacement signal.** The sidebar is the only thing that
+  shows what is narrowing the results, so below `md` active filters render as removable
+  chips under the search box, plus a count badge on the Filters button. Selected
+  statuses collapse back to their group label when every member of a group is on —
+  one tap on "Finished trials" selects six statuses and should stay one chip.
+
+Two things that bite when editing this area:
+
+- **The feedback button is `fixed` at `z-50` and rendered after `<main>`**, so it paints
+  over anything lower. The filter sheet sits at `z-[60]` for exactly that reason. It is
+  also why pagination aligns left below `sm` (right-aligned puts "Next" underneath the
+  button) and why the public trial detail page carries extra bottom padding.
+- **The admin dashboard (`/admin/*`) is desktop-only** and deliberately untouched here.
+  Its 208px sidebar and side-by-side official/custom panels need their own pass.
 
 ## Icons and document metadata
 
