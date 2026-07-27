@@ -326,6 +326,105 @@ function RadioOption({
   );
 }
 
+/**
+ * The public filter controls, shared by the desktop sidebar and the mobile
+ * filter sheet.
+ *
+ * `namePrefix` keeps the two copies' radio groups apart. The sidebar is hidden
+ * with `display:none` rather than unmounted, so both copies are always in the
+ * DOM and identically named radios would otherwise form one browser-level
+ * group.
+ */
+function PublicFilters({
+  facets,
+  params,
+  setFilters,
+  selectedStatuses,
+  onStatusesChange,
+  namePrefix,
+}: {
+  facets: TrialFacets | null;
+  params: GetTrialsParams;
+  setFilters: (patch: Partial<GetTrialsParams>) => void;
+  selectedStatuses: string[];
+  onStatusesChange: (next: string[]) => void;
+  namePrefix: string;
+}) {
+  return (
+    <>
+      {facets && facets.countries.length > 0 && (
+        <FilterSection title="Country">
+          <CountryCombobox
+            countries={facets.countries}
+            value={params.country}
+            onChange={(c) => setFilters({ country: c })}
+          />
+        </FilterSection>
+      )}
+
+      <div className="border-t border-line" />
+
+      <FilterSection title="Age">
+        <div className="space-y-1">
+          <RadioOption
+            name={`${namePrefix}-age_group`}
+            value=""
+            checked={!params.age_group}
+            label="All ages"
+            onChange={() => setFilters({ age_group: undefined })}
+          />
+          {AGE_GROUP_OPTIONS.map((o) => (
+            <RadioOption
+              key={o.value}
+              name={`${namePrefix}-age_group`}
+              value={o.value}
+              checked={params.age_group === o.value}
+              label={o.label}
+              onChange={(v) => setFilters({ age_group: v })}
+            />
+          ))}
+        </div>
+      </FilterSection>
+
+      <div className="border-t border-line" />
+
+      {facets && facets.statuses.length > 0 && (
+        <FilterSection title="Recruiting Status">
+          <StatusFilter
+            statuses={facets.statuses}
+            selected={selectedStatuses}
+            onChange={onStatusesChange}
+          />
+        </FilterSection>
+      )}
+
+      <div className="border-t border-line" />
+
+      <FilterSection title="Trial Phase">
+        <div className="space-y-1">
+          <RadioOption
+            name={`${namePrefix}-phase`}
+            value=""
+            checked={!params.phase}
+            label="All phases"
+            onChange={() => setFilters({ phase: undefined })}
+          />
+          {PHASE_OPTIONS.map((o) => (
+            <RadioOption
+              key={o.value}
+              name={`${namePrefix}-phase`}
+              value={o.value}
+              checked={params.phase === o.value}
+              label={o.label}
+              onChange={(v) => setFilters({ phase: v })}
+            />
+          ))}
+        </div>
+      </FilterSection>
+    </>
+  );
+}
+
 export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
   useDocumentTitle(adminMode ? 'All Trials' : 'Search Trials');
 
@@ -348,6 +447,8 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
   });
   const [searchInput, setSearchInput] = useState('');
   const [selectedIrrelevantId, setSelectedIrrelevantId] = useState<string | null>(null);
+  // Below `md` the filter sidebar has no room, so it moves into a sheet.
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch facets once for filter controls. Needed in both modes: the public
