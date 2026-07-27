@@ -924,9 +924,14 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
         </div>
       )}
 
-      {/* Mobile filter sheet — the sidebar's contents, slid up from the bottom */}
+      {/*
+        Mobile filter sheet — the sidebar's contents, slid up from the bottom.
+        It sits above z-50 because the feedback button is fixed at z-50 and
+        rendered after <main>, so anything lower lets that button float over
+        the sheet's backdrop.
+      */}
       {!adminMode && filtersOpen && (
-        <div className="md:hidden fixed inset-0 z-40" role="dialog" aria-modal="true" aria-label="Filters">
+        <div className="md:hidden fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label="Filters">
           <div
             className="absolute inset-0 bg-gray-900/40"
             onClick={() => setFiltersOpen(false)}

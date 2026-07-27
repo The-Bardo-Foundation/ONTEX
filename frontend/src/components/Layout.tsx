@@ -26,14 +26,10 @@ export function Layout({
   // ── Public layout ───────────────────────────────────────────────────────────
   if (variant === 'public') {
     return (
-      /*
-        min-h-dvh repeats min-h-screen for one reason: on a phone, 100vh is the
-        viewport WITHOUT the browser chrome, so the internally scrolled trials
-        page renders its pagination bar below the visible area until the URL bar
-        collapses. Tailwind emits min-h-dvh after min-h-screen, so it wins where
-        supported and is simply ignored where it is not.
-      */
-      <div className="min-h-screen min-h-dvh bg-surface flex flex-col">
+      // min-h-screen-dynamic, not min-h-screen: on a phone 100vh excludes the
+      // browser chrome, which pushes the trials page's pagination bar below the
+      // visible area. See the utility's comment in index.css.
+      <div className="min-h-screen-dynamic bg-surface flex flex-col">
         {/*
           One row at every width. From `sm` up the links sit inline and keep
           their intrinsic width (shrink-0, no wrapping mid-label) while the logo
