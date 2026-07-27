@@ -111,8 +111,10 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
     const locationSummary = formatLocationSummary(city, country);
     const locationVerbose = isLocationVerbose(city, country);
 
+    // The extra bottom padding clears the floating feedback button, which would
+    // otherwise sit on the last lines of "What to do next" at mobile widths.
     return (
-      <div className="max-w-4xl mx-auto px-6 py-8 space-y-7">
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 sm:py-8 pb-24 sm:pb-8 space-y-6 sm:space-y-7">
         {/* Back */}
         <button
           onClick={() => navigate('/trials')}
@@ -126,7 +128,7 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
 
         {/* Title */}
         <div className="space-y-1">
-          <h1 className="text-2xl font-bold text-gray-900 leading-snug">{title}</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 leading-snug">{title}</h1>
           <p className="text-xs text-gray-400">
             {trial.nct_id}
             {trial.last_update_post_date && <> · Updated {trial.last_update_post_date}</>}
@@ -148,7 +150,7 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
         )}
 
         {/* Key facts */}
-        <div className="bg-brand-50 border border-brand-100 rounded-xl p-6">
+        <div className="bg-brand-50 border border-brand-100 rounded-xl p-4 sm:p-6">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-10 gap-y-5">
             <div className="space-y-5">
               {locationSummary && (
@@ -251,7 +253,7 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
         )}
 
         {/* What to do next — static guidance shown on every trial */}
-        <section className="bg-surface border border-line rounded-xl p-6 space-y-3">
+        <section className="bg-surface border border-line rounded-xl p-4 sm:p-6 space-y-3">
           <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">What to do next</h2>
           <p className="text-sm text-gray-700 leading-relaxed">
             If you think this clinical trial may be relevant to you or your child, the next
