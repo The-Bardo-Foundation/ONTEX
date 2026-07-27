@@ -931,7 +931,7 @@ export function AllTrialsPage({ adminMode = false }: AllTrialsPageProps) {
         the sheet's backdrop.
       */}
       {!adminMode && filtersOpen && (
-        <div className="md:hidden fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label="Filters">
+        <div className="md:hidden fixed inset-0 z-[60]" role="dialog" aria-label="Filters">
           <div
             className="absolute inset-0 bg-gray-900/40"
             onClick={() => setFiltersOpen(false)}
