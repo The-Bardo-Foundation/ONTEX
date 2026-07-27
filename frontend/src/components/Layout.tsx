@@ -19,6 +19,27 @@ export function Layout({
   const { isSignedIn } = useAuth();
   const { pathname } = useLocation();
 
+  /*
+   * Collapse the mobile menu on any route change.
+   *
+   * The menu links close the panel themselves, which covers tapping one for the
+   * route you are already on — that navigates nowhere, so this would not fire.
+   * This covers every other way the route can change while the panel is open:
+   * the logo, browser back/forward, a sign-in redirect. Without it the panel
+   * stays expanded over whatever screen you land on.
+   *
+   * Adjusting state during render rather than in an effect is deliberate — it
+   * is React's documented way to reset state when a value changes, and it is
+   * what `react-hooks/set-state-in-effect` (an error in this project) exists to
+   * push you towards. React re-runs this component immediately, before anything
+   * is painted, so the panel never appears on the new route.
+   */
+  const [menuPathname, setMenuPathname] = useState(pathname);
+  if (menuPathname !== pathname) {
+    setMenuPathname(pathname);
+    setMenuOpen(false);
+  }
+
   const adminNavLinkClass = ({ isActive }: { isActive: boolean }) =>
     `block px-3 py-2 rounded-md text-sm font-medium ${
       isActive ? 'bg-brand-50 text-brand-700' : 'text-gray-600 hover:bg-gray-100'
