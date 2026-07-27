@@ -62,6 +62,16 @@ export default {
       borderColor: {
         DEFAULT: '#e8e6e6',
       },
+      // The mobile filter sheet slides up from the bottom edge.
+      keyframes: {
+        'sheet-up': {
+          from: { transform: 'translateY(100%)' },
+          to:   { transform: 'translateY(0)' },
+        },
+      },
+      animation: {
+        'sheet-up': 'sheet-up 0.22s ease-out',
+      },
     },
   },
   plugins: [],
