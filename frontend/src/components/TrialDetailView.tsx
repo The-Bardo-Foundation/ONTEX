@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { CustomEdits, TrialDetail } from '../types';
-import { formatPhase, getOverallStatusDisplay } from '../utils/formatters';
+import { formatLocationSummary, formatPhase, getOverallStatusDisplay, isLocationVerbose } from '../utils/formatters';
 import { AiClassificationCard } from './AiClassificationCard';
 import { FieldDiffPanel } from './FieldDiffPanel';
 import { IngestionEventBadge } from './IngestionEventBadge';
@@ -11,7 +11,7 @@ import { StatusBadge } from './StatusBadge';
 function InfoField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="text-xs font-semibold uppercase tracking-wide text-blue-900/60 mb-0.5">{label}</p>
+      <p className="text-xs font-semibold uppercase tracking-wide text-brand-900/60 mb-0.5">{label}</p>
       <div className="text-sm text-gray-800 leading-snug">{children}</div>
     </div>
   );
@@ -107,9 +107,14 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
     const eligibility   = trial.custom_eligibility_criteria    || trial.eligibility_criteria;
     const intervention  = trial.custom_intervention_description || trial.intervention_description;
     const statusLabel   = status ? getOverallStatusDisplay(status).label : null;
+    const hasContact    = Boolean(contact || phone || email);
+    const locationSummary = formatLocationSummary(city, country);
+    const locationVerbose = isLocationVerbose(city, country);
 
+    // The extra bottom padding clears the floating feedback button, which would
+    // otherwise sit on the last lines of "What to do next" at mobile widths.
     return (
-      <div className="max-w-4xl mx-auto px-6 py-8 space-y-7">
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 sm:py-8 pb-24 sm:pb-8 space-y-6 sm:space-y-7">
         {/* Back */}
         <button
           onClick={() => navigate('/trials')}
@@ -123,7 +128,7 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
 
         {/* Title */}
         <div className="space-y-1">
-          <h1 className="text-2xl font-bold text-gray-900 leading-snug">{title}</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 leading-snug">{title}</h1>
           <p className="text-xs text-gray-400">
             {trial.nct_id}
             {trial.last_update_post_date && <> · Updated {trial.last_update_post_date}</>}
@@ -144,48 +149,65 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
           <p className="text-base text-gray-600 leading-relaxed">{summary}</p>
         )}
 
-        {/* Info box */}
-        <div className="bg-blue-50 border border-blue-100 rounded-xl p-6">
+        {/* Key facts */}
+        <div className="bg-brand-50 border border-brand-100 rounded-xl p-4 sm:p-6">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-10 gap-y-5">
-            {/* Column 1 */}
             <div className="space-y-5">
-              {country  && <InfoField label="Country">{country}</InfoField>}
-              {city     && <InfoField label="Location">{city}</InfoField>}
-              {type     && <InfoField label="Trial Type">{type}</InfoField>}
-              {phase    && <InfoField label="Trial Phase">{formatPhase(phase)}</InfoField>}
+              {locationSummary && (
+                <InfoField label="Location">
+                  <p>{locationSummary}</p>
+                  {locationVerbose && (
+                    <details className="mt-2 group">
+                      <summary className="cursor-pointer list-none text-xs text-brand-700 hover:underline">
+                        View all locations
+                      </summary>
+                      <div className="mt-2 space-y-2 text-sm text-gray-600 leading-relaxed">
+                        {country && (
+                          <p>
+                            <span className="font-medium text-gray-700">Countries: </span>
+                            {country}
+                          </p>
+                        )}
+                        {city && (
+                          <p>
+                            <span className="font-medium text-gray-700">Cities: </span>
+                            {city}
+                          </p>
+                        )}
+                      </div>
+                    </details>
+                  )}
+                </InfoField>
+              )}
+              {type && <InfoField label="Trial Type">{type}</InfoField>}
             </div>
-
-            {/* Column 2 */}
             <div className="space-y-5">
+              {phase && <InfoField label="Trial Phase">{formatPhase(phase)}</InfoField>}
               {statusLabel && <InfoField label="Trial Status">{statusLabel}</InfoField>}
               {minAge && <InfoField label="Minimum Age">{minAge}</InfoField>}
-              {maxAge && <InfoField label="Maximum Age">{maxAge}</InfoField>}
             </div>
-
-            {/* Column 3 */}
             <div className="space-y-5">
+              {maxAge && <InfoField label="Maximum Age">{maxAge}</InfoField>}
               <InfoField label="Key Contact">
-                {(contact || phone || email) ? (
-                  <>
+                {hasContact ? (
+                  <div className="space-y-0.5">
                     {contact && <p>{contact}</p>}
-                    {phone   && <p className="text-gray-500">{phone}</p>}
-                    {email   && (
-                      <a href={`mailto:${email}`} className="text-blue-600 hover:underline break-all">
-                        {email}
-                      </a>
+                    {phone && (
+                      <a href={`tel:${phone.replace(/\s+/g, '')}`} className="block text-brand-700 hover:underline">{phone}</a>
                     )}
-                  </>
+                    {email && (
+                      <a href={`mailto:${email}`} className="block text-brand-700 hover:underline break-all">{email}</a>
+                    )}
+                  </div>
                 ) : (
-                  <p className="text-gray-500">
-                    <a
-                      href={`https://clinicaltrials.gov/study/${trial.nct_id}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 hover:underline"
-                    >
-                      View trial on ClinicalTrials.gov
-                    </a>
-                  </p>
+                  <a
+                    href={`https://clinicaltrials.gov/study/${trial.nct_id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-brand-600 hover:underline"
+                  >
+                    View trial on ClinicalTrials.gov
+                  </a>
                 )}
               </InfoField>
               <InfoField label="Clinical Trial ID">
@@ -211,13 +233,55 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
           </section>
         )}
 
-        {/* Interventions */}
+        {/* Interventions — collapsed by default; the text can be very long */}
         {intervention && (
-          <section className="space-y-2">
-            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Interventions</h2>
-            <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-line">{intervention}</p>
-          </section>
+          <details className="group border-t border-line-soft pt-4">
+            <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-semibold text-gray-700 uppercase tracking-wide">
+              Interventions
+              <svg
+                className="w-4 h-4 text-gray-400 transition-transform group-open:rotate-180"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </summary>
+            <p className="mt-3 text-sm text-gray-600 leading-relaxed whitespace-pre-line">{intervention}</p>
+          </details>
         )}
+
+        {/* What to do next — static guidance shown on every trial */}
+        <section className="bg-surface border border-line rounded-xl p-4 sm:p-6 space-y-3">
+          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">What to do next</h2>
+          <p className="text-sm text-gray-700 leading-relaxed">
+            If you think this clinical trial may be relevant to you or your child, the next
+            step is to discuss it with your healthcare team.
+          </p>
+          <p className="text-sm text-gray-700 leading-relaxed">Before your appointment, it can help to:</p>
+          <ul className="list-disc pl-5 text-sm text-gray-700 leading-relaxed space-y-1">
+            <li>Save or print the trial information</li>
+            <li>Write down any questions you have</li>
+            <li>Check the trial location and recruitment status</li>
+            <li>Review the inclusion and exclusion criteria carefully</li>
+            <li>
+              Review these suggested questions to ask your doctor:{' '}
+              <a
+                href="https://osteosarcomanow.org/questions-for-doctor/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-brand-600 hover:underline"
+              >
+                Questions for Your Doctor
+              </a>
+            </li>
+          </ul>
+          <p className="text-sm text-gray-700 leading-relaxed">
+            You can also contact the trial team directly using the contact information listed on
+            the study page to ask about referrals, availability and next steps.
+          </p>
+        </section>
       </div>
     );
   }
@@ -237,7 +301,7 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
             {adminMode && !editMode && (
               <button
                 onClick={() => setEditMode(true)}
-                className="px-3 py-1 text-sm font-medium rounded border border-blue-300 text-blue-600 hover:bg-blue-50 transition-colors"
+                className="px-3 py-1 text-sm font-medium rounded border border-brand-300 text-brand-600 hover:bg-brand-50 transition-colors"
               >
                 Edit
               </button>
@@ -245,7 +309,7 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
             {adminMode && editMode && (
               <button
                 onClick={cancelEdit}
-                className="px-3 py-1 text-sm font-medium rounded border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors"
+                className="px-3 py-1 text-sm font-medium rounded border border-gray-300 text-gray-600 hover:bg-surface transition-colors"
               >
                 Cancel
               </button>
@@ -271,7 +335,7 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
                 <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
-              {[trial.location_city, trial.location_country].filter(Boolean).join(', ')}
+              {formatLocationSummary(trial.location_city, trial.location_country)}
             </span>
           )}
           {(trial.minimum_age || trial.maximum_age) && (
@@ -331,7 +395,7 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
             <div className="mb-3">
               <label className="block text-xs font-medium text-gray-500 mb-1">Reviewer notes (optional)</label>
               <textarea
-                className="w-full border border-gray-300 rounded p-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-400"
+                className="w-full border border-gray-300 rounded p-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-brand-400"
                 rows={2}
                 placeholder="Add a note for the record…"
                 value={reviewerNotes}
@@ -379,7 +443,7 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
                     <button
                       onClick={handleSaveEdit}
                       disabled={submitting}
-                      className="px-4 py-2 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 ml-auto"
+                      className="px-4 py-2 text-sm font-medium rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 ml-auto"
                     >
                       Save Changes
                     </button>
@@ -398,7 +462,7 @@ export function TrialDetailView({ trial, onApprove, onReject, onEdit, onMarkIrre
                   <div className="flex gap-3 justify-end">
                     <button
                       onClick={() => setMarkIrrelevantMode(false)}
-                      className="px-4 py-2 text-sm rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+                      className="px-4 py-2 text-sm rounded border border-gray-300 text-gray-600 hover:bg-surface"
                     >
                       Cancel
                     </button>

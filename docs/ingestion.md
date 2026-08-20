@@ -1,6 +1,6 @@
 # Ingestion Pipeline
 
-The ingestion pipeline discovers osteosarcoma-related clinical trials on ClinicalTrials.gov, generates patient-friendly AI summaries, classifies relevance, and queues trials for human review before publication.
+The ingestion pipeline discovers osteosarcoma-related clinical trials on ClinicalTrials.gov, generates patient-friendly AI summaries, and classifies relevance. **Confident** classifications are auto-approved and published immediately; only **unsure** classifications go to the editorial review queue.
 
 ---
 
@@ -27,18 +27,21 @@ flowchart TD
     D -->|Irrelevant, same date| Z([Skip])
 
     E --> F[3.5 Preserve admin edits\nfor existing trials]
-    F --> M{3.6 Only ignored\nfields changed?}
-    M -->|Yes, existing trial| N[Silent sync official_* +\npassthrough custom_*\nNo AI, no status reset]
-    M -->|No / new trial| G[4. AI classify\nrelevance: confident / unsure / reject]
+    F --> S{3.6 Only ignored\nfields changed?}
+    S -->|Yes, existing trial| N[Silent sync official_* +\npassthrough custom_*\nNo AI, no status reset]
+    S -->|No / new trial| G[4. AI classify\nrelevance: confident / unsure / reject]
     N --> L
-    G --> I{Relevant?}
+    G --> I{Label?}
 
     I -->|confident or unsure| H[5. AI summarise\ncustom_* fields]
     I -->|reject| K[6b. Upsert → irrelevant_trials]
 
-    H --> J[6a. Upsert → clinical_trials\nstatus: PENDING_REVIEW]
+    H --> M{Confidence?}
+    M -->|confident| J1[6a. Upsert → clinical_trials\nstatus: APPROVED\napproved_by=ai]
+    M -->|unsure| J2[6a. Upsert → clinical_trials\nstatus: PENDING_REVIEW]
 
-    J --> L[7. Write IngestionRun\naudit row]
+    J1 --> L[7. Write IngestionRun\naudit row]
+    J2 --> L
     K --> L
 ```
 
@@ -121,11 +124,11 @@ Classifies whether the trial is relevant to osteosarcoma patients:
 
 | Label | Meaning |
 |-------|---------|
-| `confident` | Clearly relevant — proceeds to summarisation and review queue |
-| `unsure` | Possibly relevant — proceeds to summarisation and review queue |
+| `confident` | Clearly relevant — proceeds to summarisation and **auto-approved** (`status=APPROVED`, `approved_by="ai"`). No human review required. |
+| `unsure` | Possibly relevant — proceeds to summarisation and queued for editorial review (`status=PENDING_REVIEW`) |
 | `reject` | No osteosarcoma connection — written directly to `irrelevant_trials`, no summary generated |
 
-**Fail-safe:** classification errors default to `unsure` so the trial is included for manual review.
+**AI failure:** if the LLM call itself fails (outage/error after retries), the trial is **skipped entirely** — no row is written — and refetched on the next daily run via the Step 2 date-diff logic. This avoids storing a verdict the AI never actually made. (A genuine `unsure` verdict, by contrast, is stored as `PENDING_REVIEW`.)
 
 - Temperature: 0.1
 - Retries: 2
@@ -151,9 +154,10 @@ Only runs for trials that passed classification as `confident` or `unsure`. Gene
 
 | Outcome | Action |
 |---------|--------|
-| Relevant | `session.merge()` into `clinical_trials` with `status=PENDING_REVIEW`. If trial was in `irrelevant_trials`, that row is deleted. |
+| Confident relevant | `session.merge()` into `clinical_trials` with `status=APPROVED`, `approved_by="ai"`, `approved_at=now`. Trial is immediately visible to end-users — no human review needed. If trial was in `irrelevant_trials`, that row is deleted. |
+| Unsure relevant | `session.merge()` into `clinical_trials` with `status=PENDING_REVIEW`. Queued for editorial review. If trial was in `irrelevant_trials`, that row is deleted. |
 | Irrelevant | `session.merge()` into `irrelevant_trials`. If trial was in `clinical_trials`, that row is deleted. |
-| Previously approved | Approval preserved as `previous_approved_at` / `previous_approved_by`; status reset to `PENDING_REVIEW` for re-review. |
+| Previously approved, re-ingested | Prior approval preserved as `previous_approved_at` / `previous_approved_by`. New status depends on the fresh classification (confident → APPROVED with `approved_by="ai"`; unsure → PENDING_REVIEW). |
 
 ---
 
@@ -169,13 +173,16 @@ Writes one row to `ingestion_runs` with counts for every outcome and error, plus
 
 ```mermaid
 stateDiagram-v2
-    [*] --> PENDING_REVIEW: Ingested (new or updated)
+    [*] --> APPROVED: Ingested + AI confident\n(approved_by=ai)
+    [*] --> PENDING_REVIEW: Ingested + AI unsure
 
     PENDING_REVIEW --> APPROVED: Admin approves
     PENDING_REVIEW --> REJECTED: Admin rejects
 
-    APPROVED --> PENDING_REVIEW: Re-ingested\n(date changed)
-    REJECTED --> PENDING_REVIEW: Re-ingested\n(date changed)
+    APPROVED --> APPROVED: Re-ingested + still confident\n(stays published)
+    APPROVED --> PENDING_REVIEW: Re-ingested + now unsure\n(content changed)
+    REJECTED --> APPROVED: Re-ingested + AI confident
+    REJECTED --> PENDING_REVIEW: Re-ingested + AI unsure
 
     APPROVED --> [*]: Published to users\nvia GET /api/v1/trail
 ```
@@ -200,7 +207,7 @@ Schema: [app/db/models.py](../app/db/models.py)
 |------|---------|-----------|
 | 1 — Fetch index | API/network error | Ingestion aborted |
 | 3 — Fetch study | HTTP error or timeout | Trial skipped; `fetch_errors++` |
-| 4 — AI classify | LLM error after retries | Defaults to `unsure`; logged as `classify_errors` |
+| 4 — AI classify | LLM error after retries | Trial skipped (no row written), refetched next run; logged as `classify_errors` |
 | 5 — AI summarise | LLM error after retries | `custom_*` fields left `None`; pipeline continues |
 | 6 — DB upsert | SQL error | Exception propagates; run aborted |
 
@@ -213,7 +220,6 @@ Schema: [app/db/models.py](../app/db/models.py)
 | `SEARCH_TERMS` | `["osteosarcoma"]` | JSON list of CT.gov search terms |
 | `INGESTION_SCHEDULE_HOURS` | `24` | How often the scheduler fires |
 | `AI_MODEL` | `openai/gpt-4o-mini` | OpenRouter model for summarisation and classification |
-| `CONFIDENCE_THRESHOLD` | `0.7` | Min confidence below which irrelevant → forced secondary |
 | `PAGE_SIZE` | `100` | Results per CT.gov API page |
 | `IGNORED_UPDATE_FIELDS` | `last_update_post_date`, `location_country`, `location_city`, `central_contact_name`, `central_contact_phone`, `central_contact_email` | Fields whose change alone triggers a Step 3.6 silent sync instead of an AI rerun. JSON list. |
 | `OPENROUTER_API_KEY` | — | Required; app fails to start if missing |

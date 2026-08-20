@@ -33,7 +33,7 @@ Phases 1–3 complete; Phase 4 in progress. The ingestion pipeline is fully oper
   - `UserButton` in admin sidebar, `SignInButton` in public nav
   - Backend JWT middleware (`app/api/middleware.py`) verifies Clerk JWTs on protected endpoints (skipped in local/test environment)
 - **Public-facing viewer** (no login required):
-  - Landing page (`/`) — Bardo + Osteosarcoma logos, description, "Search Trials" CTA
+  - Landing page (`/`) — combined OSN/Bardo logo, hero, a three-figure "Why this exists" stat row, a static five-step pipeline timeline, and a closing CTA
   - Trials search page (`/trials`) — APPROVED trials only, searchable, read-only
   - Trial detail page (`/trials/:nct_id`) — read-only; shows approve/reject controls only when signed in
 - **Admin dashboard** (protected, requires Clerk login):
@@ -44,7 +44,14 @@ Phases 1–3 complete; Phase 4 in progress. The ingestion pipeline is fully oper
   - Accuracy advice history — each AI-advice generation is logged to `accuracy_advice_runs` (migration 009) with a metric snapshot + advice, surfaced via `GET /api/v1/trials/insights/advice-history` so prompt changes can be correlated with rate drift over time
   - Ingestion progress modal — step-by-step progress bars via SSE, shows counts per step
 - `approved_by`/`rejected_by` pulled from Clerk `user.primaryEmailAddress` (was hardcoded to `"admin"`)
-- 53 tests passing (API, ingestion pipeline, AI services)
+- **AI auto-approval for confident classifications** (issue #59): the ingestion pipeline now sets `status=APPROVED` and `approved_by="ai"` for trials the AI is confident about, so they are published immediately without sitting in the review queue. Only `unsure` classifications still land in `PENDING_REVIEW`. Updated trials that drop from confident to unsure revert to `PENDING_REVIEW` so editors can re-check the changed content.
+- **Public viewer (OSN-facing) layout refresh**: trial detail page keeps the contact details (name / phone / email) in the Key facts box, falls back to a "View on ClinicalTrials.gov" link when no contact exists, shows Interventions as a collapsible section, and ends with a static "What to do next" guidance block.
+- **AI label display rename**: admin-facing UI now shows `Match` / `Partial Match` / `Not Suitable` instead of the underlying `confident` / `unsure` / `reject` values. The database, prompt, and API contract still use the original enum strings — display-only change in `AiClassificationCard`, `ReviewQueuePage`, and `LandingPage`.
+- **Brand palette and landing page redesign**: a named palette (`brand` blue `#2563a8`, `accent` olive, warm `surface` / `line` neutrals) replaces Tailwind's default blue across the whole front end, admin included. The landing page is rebuilt around a stat row and a static five-step timeline. Conventions are written up in [`docs/DESIGN.md`](docs/DESIGN.md), including the fact that `tailwind.config.js` changes need a dev-server restart. Semantic recruitment-status badges in `utils/formatters.ts` deliberately keep the default green/yellow/red/blue ramps.
+- **Site identity and metadata**: real favicon/app icons derived from the Osteosarcoma Now chain mark (blue on the logo green), plus `apple-touch-icon`, `site.webmanifest`, description, `theme-color`, and Open Graph / Twitter tags in `frontend/index.html`. Tab titles are per-route via `utils/useDocumentTitle.ts` — the Vite placeholders (`<title>frontend</title>`, `vite.svg`) are gone.
+- **Recruitment status filtering rebuilt to be data-driven**: `GET /trials` now takes `overall_status=A|B` (pipe-separated raw CT.gov values, OR'd) instead of the three hardcoded `recruiting_status` buckets, and `GET /trials/facets` returns the statuses actually present with counts, auth-aware. Groupings survive as **presentation only** (`STATUS_GROUPS` in `formatters.ts`) — the public sidebar shows collapsible plain-English groups, admin dropdowns use `<optgroup>`. Fixes two real bugs: 104 of 848 trials (12%, mostly `UNKNOWN` plus expanded-access statuses) previously matched **no** filter option and were unreachable; and `NOT_YET_RECRUITING` trials were buried under a group labelled "Not currently recruiting", which read as closed and hid trials still worth a referral. See `docs/trial-status-filtering.md`.
+- **Public viewer works on a phone**: below `md` the trials page's 208px filter sidebar moves into a bottom sheet opened from a Filters button, with active filters shown as removable chips (whole status groups collapse to one chip) and a count badge. Below `sm` the header nav collapses behind a menu button, pagination aligns left and the feedback button goes icon-only so the two stop overlapping, and the full-height wrapper uses `100dvh` so nothing sits under the mobile URL bar. Desktop is unchanged above `md`. Conventions in [`docs/DESIGN.md`](docs/DESIGN.md#mobile).
+- 84 tests passing (API, ingestion pipeline, AI services, UPDATED-trial guardrail, status filtering + facets)
 - APScheduler running ingestion on configurable schedule (default 24 h)
 - Development environment (Docker/SQLite), Railway deployment, GitHub Actions CI
 
@@ -54,6 +61,11 @@ Phases 1–3 complete; Phase 4 in progress. The ingestion pipeline is fully oper
 - Phase 4: Role-based access (Admin vs. Reviewer) — can be stored as Clerk public metadata
 - Phase 5: `config.yaml` for search terms and schedule management
 - Phase 6: Verify WordPress PHP template integration end-to-end
+- Status filtering uses `overall_status` only, never `custom_overall_status`: an admin override changes the badge but not which filter the trial answers to (the countries facet does coalesce the two). See "Known gap" in `docs/trial-status-filtering.md`.
+- Design: the `accent-600` olive eyebrows sit at ~3:1 contrast on `surface`, below WCAG AA for small text. Darkening them to `accent-800` (`#607623`, 4.9:1) fixes it without changing the look much — a call for the brand owner, so left as specified for now.
+- Design: `og:image` / `og:url` in `frontend/index.html` are relative paths and need the deployed origin prefixed before social previews will render.
+- Design: the admin dashboard (`/admin/*`) is still desktop-only — fixed 208px sidebar, side-by-side official/custom panels, and a review queue that assumes a wide viewport. The mobile pass covered the public viewer only.
+- Design: the mobile filter sheet has no focus trap and does not lock background scroll, matching the other modals in the app. Opening the country combobox inside it also raises the on-screen keyboard over the sheet on iOS.
 
 ---
 
@@ -142,7 +154,7 @@ Create a new function `ai_generate_summaries(client, trial_data: dict) -> dict` 
 
 12 unit tests in `tests/test_ai_services.py`:
 - `ai_generate_summaries()`: success, LLM returns None (null dict), extra keys ignored
-- `classify_trial()`: confident/unsure/reject labels returned unchanged; AIClient fail-safe returns `unsure` so no trial is silently lost
+- `classify_trial()`: confident/unsure/reject labels returned unchanged; on AI failure AIClient returns `failed=True` so the ingestion pipeline skips the trial and refetches it next run
 - `AIClient`: JSON parse success for generate and classify, all-retries-exhausted returns None / safe default
 
 #### 2.3 API endpoint tests ✅
@@ -299,7 +311,7 @@ These are things that need a decision before or during implementation:
 
 2. **AI summarization model**: Should summarization use the same `gpt-4o-mini` as classification, or a more capable model for better quality summaries? Cost vs. quality tradeoff.
 
-3. **Re-evaluation of approved trials**: If a trial is `APPROVED` and the next daily run finds it has been updated, should we reset it to `PENDING_REVIEW` automatically? (This is specified in Phase 1.5.) Confirm this is the intended behaviour — it means approved trials could disappear from the published list until reviewed again.
+3. ~~**Re-evaluation of approved trials**: If a trial is `APPROVED` and the next daily run finds it has been updated, should we reset it to `PENDING_REVIEW` automatically?~~ **Resolved (issue #59):** when a previously-APPROVED trial is re-ingested, the new status follows the fresh AI label — confident keeps it APPROVED (no churn), unsure resets to PENDING_REVIEW so editors can re-check the changed content.
 
 4. **Auth provider choice**: Clerk, Auth0, or Supabase Auth? This affects the implementation in Phase 4.
 

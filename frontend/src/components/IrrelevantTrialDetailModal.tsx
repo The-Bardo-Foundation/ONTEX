@@ -160,14 +160,14 @@ export function IrrelevantTrialDetailModal({ nctId, onClose, onRestored }: Props
           <div className="flex gap-3 ml-auto">
             <button
               onClick={onClose}
-              className="px-4 py-2 text-sm rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+              className="px-4 py-2 text-sm rounded border border-gray-300 text-gray-600 hover:bg-surface"
             >
               Close
             </button>
             <button
               onClick={handleRestore}
               disabled={restoring || !trial}
-              className="px-4 py-2 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+              className="px-4 py-2 text-sm font-medium rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
             >
               {restoring ? 'Restoring…' : 'Restore to Review Queue'}
             </button>
