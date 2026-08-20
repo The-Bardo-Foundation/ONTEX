@@ -42,8 +42,14 @@ const LABEL_BADGE: Record<string, string> = {
 // decisions (approved/rejected). Both are rendered with the wording used on the rest
 // of the admin pages rather than the raw enum value.
 function Badge({ value, kind }: { value: string | null; kind: 'ai' | 'human' }) {
-  const key = (value ?? '').toLowerCase();
-  if (!value) return <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] font-medium text-gray-600">n/a</span>;
+  if (!value) {
+    return (
+      <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] font-medium text-gray-600">
+        n/a
+      </span>
+    );
+  }
+  const key = value.toLowerCase();
   return (
     <span
       className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
