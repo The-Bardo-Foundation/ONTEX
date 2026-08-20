@@ -43,6 +43,7 @@ flowchart TD
     J1 --> L[7. Write IngestionRun\naudit row]
     J2 --> L
     K --> L
+    L --> O[8. Email summary via Resend\nto opted-in Clerk users]
 ```
 
 ---
@@ -169,6 +170,34 @@ Writes one row to `ingestion_runs` with counts for every outcome and error, plus
 
 ---
 
+### Step 8 — Email summary
+
+**Files:** [app/services/ingestion_utils/email.py](../app/services/ingestion_utils/email.py), [app/services/clerk/recipients.py](../app/services/clerk/recipients.py)
+
+After the audit row is committed, the same summary dict that is emitted as the final `step: complete` progress event is rendered as a small HTML table and emailed via [Resend](https://resend.com). The run has already been persisted at this point, so nothing about the ingestion result depends on the email succeeding.
+
+**Recipients are resolved per run, not configured.** `get_summary_email_recipients()` calls Clerk's Backend API (`GET /v1/users`) and keeps every user whose `unsafeMetadata.emailIngestionSummary` is exactly `true`. The default is opted-**out** — a new admin receives nothing until they enable the toggle themselves under `<UserButton/>` → **Notifications** ([NotificationsSettings.tsx](../frontend/src/components/NotificationsSettings.tsx)). The flag is written client-side through Clerk's `useUser().update`, which is why it lives in `unsafeMetadata` (client-writable) rather than `publicMetadata` — it needs no backend write endpoint, and it only controls whether *that* user gets an email.
+
+The step is skipped silently, in this order, when:
+
+1. `RESEND_API_KEY` is unset — keeps local development friction-free.
+2. `INGESTION_SUMMARY_FROM` is unset.
+3. No Clerk user has opted in, or the Clerk lookup failed.
+
+Both config checks deliberately run **before** the Clerk lookup, so an unconfigured deployment does not make a pointless authenticated API call on every run.
+
+The recipient lookup is capped at 500 users (Clerk's per-page maximum) and is **not** paginated; revisit if the Clerk instance ever approaches that many users.
+
+**One email is sent per recipient**, rather than a single message with a shared `to` list. Admins are therefore not exposed to each other's addresses, and one undeliverable address cannot block the rest — each send is tried and logged independently.
+
+Both terminal paths send — the normal end-of-run summary and the early "no trials to process" exit — and both emit the same key set, so the two emails render identical tables. In the early-exit path the `new`/`updated`/`reevaluated` counts are *candidates identified*, not work completed: that branch is also reached when every fetch failed, which is why the email keeps `fetch_errors` and shows the run label as a subtitle.
+
+Resend is a runtime-optional dependency — it is imported inside the send function, so the package is only needed when an API key is actually configured.
+
+**This step cannot fail the run.** Every path — the Clerk lookup, response parsing, and each individual send — is wrapped so nothing propagates. That is load-bearing rather than merely defensive: `run_daily_ingestion` awaits the send unguarded after the run is committed, and the ingestion endpoint turns any escaping exception into `_ingestion_status["error"]`, which would report a fully successful run as failed in the admin UI. See [tests/test_notifications.py](../tests/test_notifications.py).
+
+---
+
 ## Trial Lifecycle
 
 ```mermaid
@@ -210,6 +239,8 @@ Schema: [app/db/models.py](../app/db/models.py)
 | 4 — AI classify | LLM error after retries | Trial skipped (no row written), refetched next run; logged as `classify_errors` |
 | 5 — AI summarise | LLM error after retries | `custom_*` fields left `None`; pipeline continues |
 | 6 — DB upsert | SQL error | Exception propagates; run aborted |
+| 8 — Email summary | Resend send fails | Caught and logged per recipient; remaining recipients still receive the email. Run already committed, so the result is unaffected |
+| 8 — Email summary | Clerk lookup fails, or returns a malformed body | Caught and treated as "no recipients"; the step is skipped and the run reports success |
 
 ---
 
@@ -223,3 +254,6 @@ Schema: [app/db/models.py](../app/db/models.py)
 | `PAGE_SIZE` | `100` | Results per CT.gov API page |
 | `IGNORED_UPDATE_FIELDS` | `last_update_post_date`, `location_country`, `location_city`, `central_contact_name`, `central_contact_phone`, `central_contact_email` | Fields whose change alone triggers a Step 3.6 silent sync instead of an AI rerun. JSON list. |
 | `OPENROUTER_API_KEY` | — | Required; app fails to start if missing |
+| `RESEND_API_KEY` | `""` | Resend API key. Empty disables the Step 8 summary email entirely. |
+| `INGESTION_SUMMARY_FROM` | `""` | Sender address for the summary email. Must be a domain verified in Resend. Empty skips the send. |
+| `CLERK_SECRET_KEY` | `""` | Clerk Backend API secret, used only to resolve Step 8 recipients. JWT verification uses JWKS and does not need this. |
