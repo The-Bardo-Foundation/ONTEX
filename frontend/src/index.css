@@ -1,3 +1,21 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer utilities {
+  /*
+   * Full viewport height, measured against the viewport the user can actually
+   * see. On a phone `100vh` is the viewport WITHOUT the browser chrome, so a
+   * page that scrolls internally — the trials list — renders its pagination bar
+   * below the fold until the URL bar collapses.
+   *
+   * This cannot be spelled `min-h-screen min-h-dvh`: Tailwind emits `min-h-dvh`
+   * BEFORE `min-h-screen`, so the vh rule would win. The two declarations here
+   * are ordered deliberately, with the vh one kept as the fallback for browsers
+   * predating `dvh` (Safari < 15.4, Chrome < 108).
+   */
+  .min-h-screen-dynamic {
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+}

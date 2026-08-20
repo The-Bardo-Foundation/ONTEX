@@ -15,7 +15,9 @@ Step 3.6 Skip both UPDATED clinical_trials AND re-evaluated irrelevant_trials
          whose only changes are in settings.IGNORED_UPDATE_FIELDS (e.g. date,
          location, contact info). Affected rows have their official_* fields
          silently synced - no AI re-classification, no status reset.
-Step 4  Classify relevance with AI (confident / unsure / reject)
+Step 4  Classify relevance with AI (confident / unsure / reject). If the AI call
+        itself fails (outage/error), the trial is skipped entirely this run — no row
+        is written — so Step 2's date-diff logic refetches and re-evaluates it next run.
 Step 5  Generate patient-friendly custom_* fields via AI summarisation (confident/unsure only)
 Step 6  Upsert into clinical_trials or irrelevant_trials; promote previously-
         rejected NCTs to clinical_trials (and delete their IrrelevantTrial row)
@@ -37,6 +39,7 @@ Status assignment in Step 6:
   - AI label "confident" → APPROVED, approved_by="ai" (auto-published, no human review)
   - AI label "unsure"    → PENDING_REVIEW (queued for editorial review)
   - AI label "reject"    → IrrelevantTrial table (not in ClinicalTrial at all)
+  - AI call failed       → skipped entirely (no row written); refetched next run
 
 Previously human-approved trials that are re-ingested as confident preserve the original
 human approver in approved_by/approved_at — AI re-confirmation does not overwrite human
@@ -66,6 +69,7 @@ from app.services.ingestion_skip import (
     load_existing_trial_state,
     skip_unchanged_trials,
 )
+from app.services.ingestion_utils.email import send_ingestion_summary
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +110,8 @@ async def _collect_candidates(search_terms: list[str], emit: EmitFn) -> dict[str
             )
         )
         for nct_id, last_update in rows:
+            # Later search terms overwrite earlier ones for the same NCT ID;
+            # the date is the same regardless of which term matched.
             all_candidates[nct_id] = last_update
 
     return all_candidates
@@ -115,7 +121,13 @@ async def _classify_candidates(
     all_candidates: dict[str, str],
     emit: EmitFn,
 ) -> CandidateBuckets:
-    """Step 2 — Classify each NCT ID against our database."""
+    """Step 2 — Classify each NCT ID against our database.
+
+    Three possible outcomes per candidate:
+      new_trials     – NCT not in either table → fetch & process
+      updated_trials – NCT in ClinicalTrial but date changed → re-fetch
+      rejected_hits  – NCT in IrrelevantTrial → re-evaluate if date changed
+    """
     new_trials: list[str] = []
     updated_trials: list[str] = []
     rejected_hits: list[tuple[str, str, str | None]] = []
@@ -154,6 +166,10 @@ async def _classify_candidates(
 
         new_trials.append(nct_id)
 
+    # Filter rejected candidates by date diff: only those whose CT.gov
+    # last_update_post_date has advanced since we last stored them are worth
+    # re-fetching. Their fetch + classify happens in the shared Steps 3-6 path
+    # (no dedicated reeval block).
     reeval_list = [
         nct_id
         for nct_id, api_date, stored_date in rejected_hits
@@ -164,6 +180,8 @@ async def _classify_candidates(
         new_trials=new_trials,
         updated_trials=updated_trials,
         reeval_list=reeval_list,
+        # Precomputed as a set for O(1) lookups in the per-trial loops of
+        # Steps 3.6 and 6 (avoids an O(n^2) list rebuild per trial).
         rejected_nct_ids={nct_id for nct_id, _, _ in rejected_hits},
     )
 
@@ -214,6 +232,11 @@ async def _record_empty_run(
     fetch_errors: int,
     emit: EmitFn,
 ) -> None:
+    """Early exit — Step 3 fetched nothing, so log the run and skip Steps 3.5-7.
+
+    The audit row still records what Step 2 found, so a run where every fetch
+    errored is distinguishable from a run with no candidates at all.
+    """
     async with SessionLocal() as db:
         db.add(IngestionRun(
             run_at=datetime.utcnow(),
@@ -226,31 +249,57 @@ async def _record_empty_run(
         ))
         await db.commit()
 
-    await emit({
+    # Same key set as _record_ingestion_run's final_summary so both terminal
+    # paths produce an identical email table. The new/updated/reevaluated counts
+    # here are candidates identified, not work completed — this branch is also
+    # reached when every fetch failed, which `fetch_errors` and the label make
+    # visible.
+    empty_summary = {
         "step": "complete",
         "label": "Done — no trials to process",
-        "new": 0,
-        "updated": 0,
+        "search_terms": search_terms,
+        "candidates_found": len(all_candidates),
+        "new": len(buckets.new_trials),
+        "updated": len(buckets.updated_trials),
+        "skipped_unchanged": 0,
+        "reevaluated": len(buckets.reeval_list),
         "relevant": 0,
+        "auto_approved": 0,
+        "pending_review": 0,
         "irrelevant": 0,
         "fetch_errors": fetch_errors,
         "classify_errors": 0,
-    })
+    }
+    await emit(empty_summary)
     logger.info(
         "Ingestion complete: no trials to process "
         "(search_terms=%s, candidates=%d, new=%d, updated=%d, reeval=%d, fetch_errors=%d)",
         search_terms, len(all_candidates), len(buckets.new_trials),
         len(buckets.updated_trials), len(buckets.reeval_list), fetch_errors,
     )
+    await send_ingestion_summary(empty_summary)
 
 
+# ──────────────────────────────────────────────────────────
+# STEP 4 — Relevance classification
+# Three verdicts plus a failure mode:
+#   confident / unsure – trial is relevant enough to summarise (Step 5)
+#   reject             – no osteosarcoma connection → irrelevant_trials
+#   failed             – the AI call itself errored → trial stored NOWHERE
+# ──────────────────────────────────────────────────────────
 async def _classify_fetched_trials(
     fetched: list[dict],
     ai_client: AIClient,
     emit: EmitFn,
-) -> tuple[dict[str, ClassificationResult], int]:
-    """Step 4 — Relevance classification."""
-    classify_errors = 0
+) -> tuple[dict[str, ClassificationResult], set[str]]:
+    """Step 4 — Relevance classification.
+
+    Returns (classifications, failed_ids). Trials in `failed_ids` are ones whose
+    classification genuinely failed (LLM outage/error); they are written NOWHERE
+    this run — leaving the DB untouched so Step 2's date-diff logic refetches and
+    re-evaluates them on the next daily run.
+    """
+    # classifications[nct_id] = ClassificationResult
     classifications: dict[str, ClassificationResult] = {}
     classify_total = len(fetched)
 
@@ -267,10 +316,14 @@ async def _classify_fetched_trials(
             classification = await classify_trial(ai_client, trial_data)
         except Exception as exc:
             logger.error("classify_trial raised for %s: %s", nct_id, exc)
-            classify_errors += 1
+            # Genuine AI failure: flag it so this trial is skipped (not stored) and
+            # refetched on the next run, rather than parked as a bogus "unsure".
             classification = ClassificationResult(
                 label=ConfidenceLabel.UNSURE,
-                reason=f"Classification error — needs manual review: {exc}",
+                # Truncated: reason has max_length=500, and a ValidationError
+                # raised here would abort the whole run.
+                reason=f"Classification error: {exc}"[:500],
+                failed=True,
             )
         classifications[nct_id] = classification
         await emit({
@@ -280,20 +333,30 @@ async def _classify_fetched_trials(
             "total": classify_total,
         })
 
-    return classifications, classify_errors
+    failed_ids = {nct for nct, c in classifications.items() if c.failed}
+    return classifications, failed_ids
 
 
 def _split_by_relevance(
     fetched: list[dict],
     classifications: dict[str, ClassificationResult],
+    failed_ids: set[str],
 ) -> tuple[list[dict], list[dict]]:
+    """Split fetched trials on their Step 4 verdict.
+
+    Only confident/unsure (and not failed) get AI summaries; reject (and not
+    failed) go to the irrelevant table; failed go nowhere.
+    """
     to_summarize = [
         td for td in fetched
-        if classifications.get(td.get("nct_id"), ClassificationResult(
-            label=ConfidenceLabel.REJECT, reason=""
-        )).label != ConfidenceLabel.REJECT
+        if td.get("nct_id") not in failed_ids
+        and classifications[td.get("nct_id")].label != ConfidenceLabel.REJECT
     ]
-    to_reject = [td for td in fetched if td not in to_summarize]
+    to_reject = [
+        td for td in fetched
+        if td.get("nct_id") not in failed_ids
+        and classifications[td.get("nct_id")].label == ConfidenceLabel.REJECT
+    ]
     return to_summarize, to_reject
 
 
@@ -315,6 +378,7 @@ async def _summarize_trials(
 
     for summarize_idx, trial_data in enumerate(to_summarize):
         custom_fields = await ai_generate_summaries(ai_client, trial_data)
+        # Apply AI-generated fields, but preserve any non-null admin-edited values.
         protected = existing_custom_map.get(trial_data.get("nct_id"), {})
         for field_name, value in custom_fields.items():
             trial_data[field_name] = protected.get(field_name, value)
@@ -449,24 +513,28 @@ async def _record_ingestion_run(
         ))
         await db.commit()
 
-    await emit({
+    final_summary = {
         "step": "complete",
         "label": "Done",
+        "search_terms": search_terms,
+        "candidates_found": len(all_candidates),
         "new": len(buckets.new_trials),
         "updated": updated_trials_count,
         "skipped_unchanged": skipped_unchanged_count,
+        "reevaluated": reeval_trials_count,
         "relevant": processed,
         "auto_approved": auto_approved,
         "pending_review": pending_review,
         "irrelevant": newly_irrelevant,
         "fetch_errors": fetch_errors,
         "classify_errors": classify_errors,
-    })
+    }
+    await emit(final_summary)
 
     logger.info(
         "Ingestion complete: %d new, %d updated, %d skipped (unchanged), %d re-evaluated | "
         "%d relevant (%d auto-approved, %d pending review), %d irrelevant | "
-        "%d fetch errors, %d classify errors | "
+        "%d fetch errors, %d classify failures (skipped, will retry next run) | "
         "search_terms=%s, total_candidates=%d",
         len(buckets.new_trials),
         updated_trials_count,
@@ -482,22 +550,41 @@ async def _record_ingestion_run(
         len(all_candidates),
     )
 
+    await send_ingestion_summary(final_summary)
+
 
 async def run_daily_ingestion(
     search_terms: List[str] | None = None,
     progress_callback: ProgressCallback = None,
 ):
+    """Run one full ingestion pass; see PIPELINE OVERVIEW above for the steps."""
     if search_terms is None:
         search_terms = settings.SEARCH_TERMS
 
     emit = _make_emit(progress_callback)
 
+    # ──────────────────────────────────────────────────────────
+    # STEP 1 — Collect NCT IDs + last-update dates for each search term
+    # ──────────────────────────────────────────────────────────
     all_candidates = await _collect_candidates(search_terms, emit)
+
+    # ──────────────────────────────────────────────────────────
+    # STEP 2 — Classify each NCT ID against our database
+    # Three possible outcomes per candidate:
+    #   new_trials     – NCT not in either table → fetch & process
+    #   updated_trials – NCT in ClinicalTrial but date changed → re-fetch
+    #   reeval_list    – NCT in IrrelevantTrial and date changed → re-evaluate
+    # ──────────────────────────────────────────────────────────
     buckets = await _classify_candidates(all_candidates, emit)
 
+    # ──────────────────────────────────────────────────────────
+    # STEP 3 — Fetch full study data for all trials that need processing
+    # ──────────────────────────────────────────────────────────
     trials_to_process = buckets.new_trials + buckets.updated_trials + buckets.reeval_list
     fetched, fetch_errors = await _fetch_trial_details(trials_to_process, emit)
 
+    # Nothing survived the fetch: log the run, send the Step 8 summary, and stop
+    # before touching the AI.
     if not fetched:
         await _record_empty_run(
             search_terms=search_terms,
@@ -508,11 +595,25 @@ async def run_daily_ingestion(
         )
         return
 
+    # ──────────────────────────────────────────────────────────
+    # STEP 3.5 — Protect admin-edited custom_* fields on re-ingestion
+    # Only trials that were previously in the DB may have admin-edited fields,
+    # so we load state for the updated + re-evaluated buckets only. The
+    # official_* snapshot loaded here is what Step 3.6 compares against.
+    # ──────────────────────────────────────────────────────────
     trials_with_existing_edits = set(buckets.updated_trials) | set(buckets.reeval_list)
     existing_state = await load_existing_trial_state(
         SessionLocal, trials_with_existing_edits, fetched,
     )
 
+    # ──────────────────────────────────────────────────────────
+    # STEP 3.6 — Skip trials whose only changes are ignored fields
+    # ClinicalTrials.gov frequently bumps last_update_post_date for
+    # administrative touches (contact info, location adjustments) that have no
+    # bearing on relevance or summary content. Those rows get their official_*
+    # fields silently synced and drop out of `fetched` — no AI rerun, no status
+    # reset — leaving only genuinely changed trials for Steps 4–6.
+    # ──────────────────────────────────────────────────────────
     skip_result = await skip_unchanged_trials(
         SessionLocal,
         fetched,
@@ -523,26 +624,48 @@ async def run_daily_ingestion(
     )
     fetched = skip_result.remaining_fetched
 
+    # ──────────────────────────────────────────────────────────
+    # STEP 4 — Relevance classification
+    # AIClient is instantiated once per run (one connection pool) and reused by
+    # Step 5. If OPENROUTER_API_KEY is not set, AIClient raises RuntimeError here.
+    # ──────────────────────────────────────────────────────────
     ai_client = AIClient()
-    classifications, classify_errors = await _classify_fetched_trials(
+    classifications, failed_ids = await _classify_fetched_trials(
         fetched, ai_client, emit,
     )
-    to_summarize, to_reject = _split_by_relevance(fetched, classifications)
+    classify_errors = len(failed_ids)
+    to_summarize, to_reject = _split_by_relevance(fetched, classifications, failed_ids)
 
+    # ──────────────────────────────────────────────────────────
+    # STEP 5 — AI summarisation: populate custom_* fields for relevant trials only
+    # Admin-edited values from Step 3.5 win over anything the AI generates.
+    # ──────────────────────────────────────────────────────────
     await _summarize_trials(
         to_summarize, ai_client, existing_state.custom_map, emit,
     )
 
+    # ──────────────────────────────────────────────────────────
+    # STEP 6 — Database upsert
+    # to_summarize → clinical_trials (confident ⇒ APPROVED, unsure ⇒
+    # PENDING_REVIEW), to_reject → irrelevant_trials. A trial that switched
+    # tables has its row in the other table deleted.
+    # ──────────────────────────────────────────────────────────
     processed, auto_approved, pending_review, newly_irrelevant = await _upsert_trials(
         to_summarize,
         to_reject,
         classifications=classifications,
+        # ingestion_event: updated_trials are UPDATED, everything else is NEW.
+        # Step 3.6's unchanged trials were already handled and dropped from `fetched`.
         updated_nct_ids=set(buckets.updated_trials),
         rejected_nct_ids=buckets.rejected_nct_ids,
         existing_approval_map=existing_state.approval_map,
         existing_snapshot_map=existing_state.snapshot_map,
     )
 
+    # ──────────────────────────────────────────────────────────
+    # STEP 7 — Write ingestion run record + log summary
+    # STEP 8 — Email that same summary (sent from inside _record_ingestion_run)
+    # ──────────────────────────────────────────────────────────
     await _record_ingestion_run(
         search_terms=search_terms,
         all_candidates=all_candidates,

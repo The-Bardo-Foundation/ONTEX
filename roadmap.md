@@ -16,7 +16,7 @@ Phases 1–3 complete; Phase 4 in progress. The ingestion pipeline is fully oper
 - OpenAI async client wrapper with retry logic and fail-safe behaviour
 - Relevance classifier (`classifier.py`) — fully wired, Pydantic v2; AI returns discrete label (`confident`/`unsure`/`reject`) instead of a numeric confidence score
 - AI summariser (`summarizer.py`) — generates patient-friendly `custom_*` fields; fail-safe on LLM error
-- **Full ingestion pipeline** (`ingestion.py`) — Steps 1–7 implemented end-to-end, with `ingestion_event` (NEW/UPDATED) and `previous_official_snapshot` support
+- **Full ingestion pipeline** — Steps 1–7 implemented end-to-end, with `ingestion_event` (NEW/UPDATED) and `previous_official_snapshot` support. `run_daily_ingestion()` in `ingestion.py` is a thin orchestrator that delegates each step to a helper; Steps 3.5/3.6 (admin-edit preservation and the unchanged-content skip) live in `ingestion_skip.py`. Module map in [`docs/ingestion.md`](docs/ingestion.md#module-structure).
 - Migration `004_phase3_review_queue` — adds `ingestion_event`, `reviewer_notes`, `rejected_at/by`, `previous_official_snapshot`
 - FastAPI backend with full review queue API:
   - `GET /api/v1/trials/review-queue` — pending trials with ingestion_event (auth-protected)
@@ -33,7 +33,7 @@ Phases 1–3 complete; Phase 4 in progress. The ingestion pipeline is fully oper
   - `UserButton` in admin sidebar, `SignInButton` in public nav
   - Backend JWT middleware (`app/api/middleware.py`) verifies Clerk JWTs on protected endpoints (skipped in local/test environment)
 - **Public-facing viewer** (no login required):
-  - Landing page (`/`) — Bardo + Osteosarcoma logos, description, "Search Trials" CTA
+  - Landing page (`/`) — combined OSN/Bardo logo, hero, a three-figure "Why this exists" stat row, a static five-step pipeline timeline, and a closing CTA
   - Trials search page (`/trials`) — APPROVED trials only, searchable, read-only
   - Trial detail page (`/trials/:nct_id`) — read-only; shows approve/reject controls only when signed in
 - **Admin dashboard** (protected, requires Clerk login):
@@ -42,9 +42,13 @@ Phases 1–3 complete; Phase 4 in progress. The ingestion pipeline is fully oper
   - Ingestion progress modal — step-by-step progress bars via SSE, shows counts per step
 - `approved_by`/`rejected_by` pulled from Clerk `user.primaryEmailAddress` (was hardcoded to `"admin"`)
 - **AI auto-approval for confident classifications** (issue #59): the ingestion pipeline now sets `status=APPROVED` and `approved_by="ai"` for trials the AI is confident about, so they are published immediately without sitting in the review queue. Only `unsure` classifications still land in `PENDING_REVIEW`. Updated trials that drop from confident to unsure revert to `PENDING_REVIEW` so editors can re-check the changed content.
-- **Public viewer (OSN-facing) layout refresh**: trial detail page keeps the contact details (name / phone / email) in the Key facts box, falls back to a "View on ClinicalTrials.gov" link when no contact exists, shows Interventions as a collapsible section, and ends with a static "What to do next" guidance block. Admin view unchanged.
+- **Public viewer (OSN-facing) layout refresh**: trial detail page keeps the contact details (name / phone / email) in the Key facts box, falls back to a "View on ClinicalTrials.gov" link when no contact exists, shows Interventions as a collapsible section, and ends with a static "What to do next" guidance block.
 - **AI label display rename**: admin-facing UI now shows `Match` / `Partial Match` / `Not Suitable` instead of the underlying `confident` / `unsure` / `reject` values. The database, prompt, and API contract still use the original enum strings — display-only change in `AiClassificationCard`, `ReviewQueuePage`, and `LandingPage`.
-- 68 tests passing (API, ingestion pipeline, AI services, UPDATED-trial guardrail)
+- **Brand palette and landing page redesign**: a named palette (`brand` blue `#2563a8`, `accent` olive, warm `surface` / `line` neutrals) replaces Tailwind's default blue across the whole front end, admin included. The landing page is rebuilt around a stat row and a static five-step timeline. Conventions are written up in [`docs/DESIGN.md`](docs/DESIGN.md), including the fact that `tailwind.config.js` changes need a dev-server restart. Semantic recruitment-status badges in `utils/formatters.ts` deliberately keep the default green/yellow/red/blue ramps.
+- **Site identity and metadata**: real favicon/app icons derived from the Osteosarcoma Now chain mark (blue on the logo green), plus `apple-touch-icon`, `site.webmanifest`, description, `theme-color`, and Open Graph / Twitter tags in `frontend/index.html`. Tab titles are per-route via `utils/useDocumentTitle.ts` — the Vite placeholders (`<title>frontend</title>`, `vite.svg`) are gone.
+- **Recruitment status filtering rebuilt to be data-driven**: `GET /trials` now takes `overall_status=A|B` (pipe-separated raw CT.gov values, OR'd) instead of the three hardcoded `recruiting_status` buckets, and `GET /trials/facets` returns the statuses actually present with counts, auth-aware. Groupings survive as **presentation only** (`STATUS_GROUPS` in `formatters.ts`) — the public sidebar shows collapsible plain-English groups, admin dropdowns use `<optgroup>`. Fixes two real bugs: 104 of 848 trials (12%, mostly `UNKNOWN` plus expanded-access statuses) previously matched **no** filter option and were unreachable; and `NOT_YET_RECRUITING` trials were buried under a group labelled "Not currently recruiting", which read as closed and hid trials still worth a referral. See `docs/trial-status-filtering.md`.
+- **Public viewer works on a phone**: below `md` the trials page's 208px filter sidebar moves into a bottom sheet opened from a Filters button, with active filters shown as removable chips (whole status groups collapse to one chip) and a count badge. Below `sm` the header nav collapses behind a menu button, pagination aligns left and the feedback button goes icon-only so the two stop overlapping, and the full-height wrapper uses `100dvh` so nothing sits under the mobile URL bar. Desktop is unchanged above `md`. Conventions in [`docs/DESIGN.md`](docs/DESIGN.md#mobile).
+- 84 tests passing (API, ingestion pipeline, AI services, UPDATED-trial guardrail, status filtering + facets)
 - APScheduler running ingestion on configurable schedule (default 24 h)
 - Development environment (Docker/SQLite), Railway deployment, GitHub Actions CI
 
@@ -54,6 +58,11 @@ Phases 1–3 complete; Phase 4 in progress. The ingestion pipeline is fully oper
 - Phase 4: Role-based access (Admin vs. Reviewer) — can be stored as Clerk public metadata
 - Phase 5: `config.yaml` for search terms and schedule management
 - Phase 6: Verify WordPress PHP template integration end-to-end
+- Status filtering uses `overall_status` only, never `custom_overall_status`: an admin override changes the badge but not which filter the trial answers to (the countries facet does coalesce the two). See "Known gap" in `docs/trial-status-filtering.md`.
+- Design: the `accent-600` olive eyebrows sit at ~3:1 contrast on `surface`, below WCAG AA for small text. Darkening them to `accent-800` (`#607623`, 4.9:1) fixes it without changing the look much — a call for the brand owner, so left as specified for now.
+- Design: `og:image` / `og:url` in `frontend/index.html` are relative paths and need the deployed origin prefixed before social previews will render.
+- Design: the admin dashboard (`/admin/*`) is still desktop-only — fixed 208px sidebar, side-by-side official/custom panels, and a review queue that assumes a wide viewport. The mobile pass covered the public viewer only.
+- Design: the mobile filter sheet has no focus trap and does not lock background scroll, matching the other modals in the app. Opening the country combobox inside it also raises the on-screen keyboard over the sheet on iOS.
 
 ---
 
@@ -142,7 +151,7 @@ Create a new function `ai_generate_summaries(client, trial_data: dict) -> dict` 
 
 12 unit tests in `tests/test_ai_services.py`:
 - `ai_generate_summaries()`: success, LLM returns None (null dict), extra keys ignored
-- `classify_trial()`: confident/unsure/reject labels returned unchanged; AIClient fail-safe returns `unsure` so no trial is silently lost
+- `classify_trial()`: confident/unsure/reject labels returned unchanged; on AI failure AIClient returns `failed=True` so the ingestion pipeline skips the trial and refetches it next run
 - `AIClient`: JSON parse success for generate and classify, all-retries-exhausted returns None / safe default
 
 #### 2.3 API endpoint tests ✅
@@ -239,6 +248,9 @@ A separate **All Trials** page (existing Approved/Rejected tabs):
 - Ingestion pipeline progress tracking added (`progress_callback` parameter)
 - New SSE endpoint `GET /api/v1/ingestion/run-stream` — streams step-by-step progress
 - `IngestionProgressModal` component with per-step progress bars and final summary
+- **Daily ingestion summary email** (Step 8 of the pipeline): after each run the summary counts are emailed via Resend. Skipped silently when `RESEND_API_KEY`/`INGESTION_SUMMARY_FROM` are unset or nobody has opted in. See [docs/ingestion.md](docs/ingestion.md).
+- Summary recipients are resolved per run from Clerk users (opt-in via `unsafeMetadata.emailIngestionSummary`) rather than a static env var. Toggle lives in `<UserButton/>` → Notifications. Default is opted-OUT. One email is sent per recipient, so addresses are never shared between admins.
+- Step 8 is fully non-fatal: Clerk lookup, response parsing and each send are individually guarded, because the pipeline awaits the send unguarded after committing. Covered by `tests/test_notifications.py` (30 tests).
 
 #### Remaining in Phase 4
 

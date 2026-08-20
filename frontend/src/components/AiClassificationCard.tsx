@@ -29,7 +29,7 @@ export function AiClassificationCard({ trial }: { trial: TrialDetail }) {
   const borderAccent = ai_relevance_label ? (BORDER_ACCENT[ai_relevance_label] ?? 'border-l-gray-300') : 'border-l-gray-300';
 
   return (
-    <div className={`rounded-lg border border-l-4 p-4 bg-gray-50 border-gray-200 ${borderAccent}`}>
+    <div className={`rounded-lg border border-l-4 p-4 bg-surface border-line ${borderAccent}`}>
       <div className="flex items-center gap-1.5 mb-2">
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" className="text-indigo-400 shrink-0" aria-hidden="true">
           <path d="M7 0L8.5 5.5L14 7L8.5 8.5L7 14L5.5 8.5L0 7L5.5 5.5L7 0Z" fill="currentColor" />
@@ -37,7 +37,7 @@ export function AiClassificationCard({ trial }: { trial: TrialDetail }) {
         <h3 className="text-sm font-semibold text-gray-700">AI Classification</h3>
       </div>
 
-      <hr className="border-gray-200 mb-3" />
+      <hr className="border-line mb-3" />
 
       {ai_relevance_label && labelStyle && (
         <div className="mb-3">

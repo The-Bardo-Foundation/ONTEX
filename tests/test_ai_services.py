@@ -178,7 +178,7 @@ async def test_ai_client_classify_trial_parses_json_on_success(ai_client):
 
 
 @pytest.mark.asyncio
-async def test_ai_client_classify_trial_returns_safe_default_on_failure(ai_client):
+async def test_ai_client_classify_trial_flags_failed_on_failure(ai_client):
     ai_client._client.chat.completions.create = AsyncMock(
         side_effect=RuntimeError("API down")
     )
@@ -186,5 +186,6 @@ async def test_ai_client_classify_trial_returns_safe_default_on_failure(ai_clien
     result = await ai_client.classify_trial("sys", "user", max_retries=0)
 
     assert isinstance(result, ClassificationResult)
-    assert result.label == ConfidenceLabel.UNSURE
-    assert "needs manual review" in result.reason
+    # failed=True is what makes the ingestion pipeline skip the trial and refetch it.
+    assert result.failed is True
+    assert "AI evaluation failed" in result.reason
