@@ -1,6 +1,10 @@
+# Floors, not pins. Everything else is unpinned, so pip resolves against PyPI as
+# it looks today: any impossible constraint makes it backtrack every package
+# until it hits sdists that no longer build. Do not re-pin httpx to <0.28 —
+# that caps h11 <0.15 and conflicts with what openai needs.
 aiofiles
 fastapi
-uvicorn
+uvicorn>=0.30
 sqlalchemy
 asyncpg
 alembic
@@ -14,7 +18,7 @@ pydantic-settings
 python-dotenv
 requests
 aiosqlite
-httpx==0.23.3
+httpx>=0.28
 pytest-asyncio>=0.23.0
 psycopg2-binary
 pre-commit

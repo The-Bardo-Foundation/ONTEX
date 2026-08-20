@@ -440,6 +440,20 @@ docker-compose ps
 pip install -r requirements.txt
 ```
 
+**Error:** `Failed to build 'uvicorn' when getting requirements to build wheel`
+
+The package named in the error is a red herring. `requirements.txt` is unpinned
+except for a few floors, so pip resolves against PyPI as it looks today. When a
+constraint becomes unsatisfiable, pip backtracks through older and older versions
+of *every* unpinned package until it reaches sdists from before wheels were
+common — and those fail to build. Whatever it happens to be chewing on when it
+gives up is what gets named.
+
+Look for `INFO: pip is looking at multiple versions of ...` earlier in the log:
+that names the real conflict. The fix is to relax or drop the constraint causing
+it, not to pin the package in the error message. This bit us once already when
+`httpx==0.23.3` capped `h11 <0.15` while `openai` had moved to `h11 >=0.16`.
+
 ### Frontend Won't Start
 
 **Error:** `Port 5173 already in use`

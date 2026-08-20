@@ -150,3 +150,116 @@ export interface IrrelevantTrialDetail {
 export interface MarkIrrelevantBody {
   irrelevance_reason?: string;
 }
+
+export interface AiLabelBreakdown {
+  label: string;
+  approved: number;
+  rejected: number;
+  pending: number;
+}
+
+export interface StatisticsResponse {
+  approved_by_admin: number;
+  rejected_by_admin: number;
+  pending_review: number;
+  ai_auto_rejected: number;
+  total: number;
+  ai_confident_approval_rate: number | null;
+  by_ai_label: AiLabelBreakdown[];
+}
+
+export interface TrialExample {
+  nct_id: string;
+  brief_title: string;
+  ai_relevance_label: string | null;
+  ai_relevance_reason: string | null;
+  reviewer_notes: string | null;
+  human_decision: string;
+}
+
+export interface PatternBucket {
+  dimension: string;
+  value: string;
+  approved: number;
+  rejected: number;
+}
+
+export interface InsightsResponse {
+  confident_approved: number;
+  confident_rejected: number;
+  confident_error_rate: number | null;
+  unsure_approved: number;
+  unsure_rejected: number;
+  unsure_pending: number;
+  unsure_approval_rate: number | null;
+  false_negative_count: number;
+  confident_false_positives: TrialExample[];
+  unsure_resolved: TrialExample[];
+  false_negatives: TrialExample[];
+  unsure_patterns: PatternBucket[];
+}
+
+export interface PromptEdit {
+  action: 'replace' | 'insert_after' | 'insert_before' | 'append';
+  find: string | null;
+  content: string;
+}
+
+export interface AccuracyAdvice {
+  summary: string;
+  patterns: string[];
+  recommendations: string[];
+  prompt_edits: PromptEdit[];
+  proposed_system_prompt: string;
+}
+
+export interface AdviceRun {
+  id: number;
+  created_at: string;
+  ai_model: string;
+  confident_approved: number;
+  confident_rejected: number;
+  confident_error_rate: number | null;
+  unsure_approved: number;
+  unsure_rejected: number;
+  unsure_pending: number;
+  unsure_approval_rate: number | null;
+  false_negative_count: number;
+  examples_used: number;
+  summary: string | null;
+  patterns: string[];
+  recommendations: string[];
+  proposed_prompt: string | null;
+}
+
+export interface AdviceHistoryResponse {
+  runs: AdviceRun[];
+}
+
+export interface PromptVersion {
+  id: number;
+  created_at: string;
+  source: string;
+  note: string | null;
+  is_active: boolean;
+  created_by: string | null;
+  content: string;
+}
+
+export interface ClassifierPromptResponse {
+  active: PromptVersion | null;
+  versions: PromptVersion[];
+}
+
+export interface BacktestMetrics {
+  confident_error_rate: number | null;
+  unsure_rate: number | null;
+  false_negative_count: number;
+  correct_auto_count: number;
+}
+
+export interface BacktestResponse {
+  sample_size: number;
+  candidate: BacktestMetrics;
+  baseline: BacktestMetrics;
+}

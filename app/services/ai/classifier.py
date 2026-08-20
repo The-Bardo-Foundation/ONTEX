@@ -10,8 +10,13 @@ logger = logging.getLogger(__name__)
 async def classify_trial(
     client: AIClient,
     trial: dict,
+    system_prompt: str | None = None,
 ) -> ClassificationResult:
     """Classify a trial dict for osteosarcoma relevance.
+
+    ``system_prompt`` is the active classifier prompt; callers resolve it once
+    per run from the prompt store. It defaults to the hardcoded
+    CLASSIFICATION_SYSTEM_PROMPT as a fallback.
 
     Returns ClassificationResult with label "confident", "unsure", or "reject".
     The AIClient returns a safe "unsure" default on hard failures, so this
@@ -29,6 +34,6 @@ async def classify_trial(
     )
 
     return await client.classify_trial(
-        system_prompt=CLASSIFICATION_SYSTEM_PROMPT,
+        system_prompt=system_prompt or CLASSIFICATION_SYSTEM_PROMPT,
         user_prompt=user_prompt,
     )
