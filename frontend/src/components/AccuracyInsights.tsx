@@ -18,6 +18,7 @@ import type {
   PromptVersion,
   TrialExample,
 } from '../types';
+import { formatAiLabel, formatHumanDecision } from '../utils/formatters';
 
 const DIMENSION_LABEL: Record<string, string> = {
   phase: 'Phase',
@@ -37,15 +38,19 @@ const LABEL_BADGE: Record<string, string> = {
   rejected: 'bg-red-50 text-red-700',
 };
 
-function Badge({ value }: { value: string | null }) {
+// `ai` values are AI labels (confident/unsure/reject), `human` values are reviewer
+// decisions (approved/rejected). Both are rendered with the wording used on the rest
+// of the admin pages rather than the raw enum value.
+function Badge({ value, kind }: { value: string | null; kind: 'ai' | 'human' }) {
   const key = (value ?? '').toLowerCase();
+  if (!value) return <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] font-medium text-gray-600">n/a</span>;
   return (
     <span
       className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
         LABEL_BADGE[key] ?? 'bg-gray-100 text-gray-600'
       }`}
     >
-      {value ?? 'n/a'}
+      {kind === 'ai' ? formatAiLabel(value) : formatHumanDecision(value)}
     </span>
   );
 }
@@ -76,9 +81,9 @@ function ExampleList({ title, examples, emptyText }: {
                 <span className="shrink-0 text-xs text-gray-400">{ex.nct_id}</span>
               </div>
               <div className="mt-1.5 flex items-center gap-1.5 text-xs text-gray-500">
-                <Badge value={ex.ai_relevance_label} />
+                <Badge value={ex.ai_relevance_label} kind="ai" />
                 <span aria-hidden>→</span>
-                <Badge value={ex.human_decision} />
+                <Badge value={ex.human_decision} kind="human" />
               </div>
               {ex.reviewer_notes && (
                 <p className="mt-1.5 line-clamp-2 text-xs text-gray-600" title={ex.reviewer_notes}>
@@ -115,7 +120,7 @@ function PatternTable({ patterns }: { patterns: PatternBucket[] }) {
   if (significant.length === 0) {
     return (
       <div className="bg-white border border-gray-200 rounded-lg shadow-sm px-5 py-4 text-sm text-gray-500">
-        Not enough resolved unsure trials yet. Segments appear here once they reach{' '}
+        Not enough resolved Partial Match trials yet. Segments appear here once they reach{' '}
         {MIN_PATTERN_DECISIONS} reviewer decisions, so the lean reflects a real pattern rather
         than a small-sample coincidence.
       </div>
@@ -429,13 +434,13 @@ function BacktestResultView({ result }: { result: BacktestResponse }) {
     className: string;
   }[] = [
     {
-      label: 'Confident error rate',
+      label: 'Match error rate',
       base: pct(baseline.confident_error_rate),
       cand: pct(candidate.confident_error_rate),
       className: metricDelta(candidate.confident_error_rate, baseline.confident_error_rate, true),
     },
     {
-      label: 'Unsure rate',
+      label: 'Partial Match rate',
       base: pct(baseline.unsure_rate),
       cand: pct(candidate.unsure_rate),
       className: metricDelta(candidate.unsure_rate, baseline.unsure_rate, true),
@@ -725,8 +730,8 @@ function AdviceHistory({ runs }: { runs: AdviceRun[] }) {
             <span className="font-medium text-gray-700">
               {new Date(run.created_at).toLocaleString()}
             </span>
-            <span>confident error {pct(run.confident_error_rate)}</span>
-            <span>unsure approval {pct(run.unsure_approval_rate)}</span>
+            <span>match error {pct(run.confident_error_rate)}</span>
+            <span>partial-match approval {pct(run.unsure_approval_rate)}</span>
             <span>false negatives {run.false_negative_count}</span>
             <span>{run.examples_used} examples</span>
             <span className="text-gray-400">{run.ai_model}</span>
@@ -826,8 +831,8 @@ export function AccuracyInsights() {
     <div className="mt-10">
       <h2 className="text-xl font-semibold text-gray-900">Accuracy insights</h2>
       <p className="mt-1 text-sm text-gray-500">
-        Confident trials are auto-published, so the focus is keeping confident errors at zero
-        and shrinking the unsure bucket that reviewers must process by hand.
+        Match trials are auto-published, so the focus is keeping Match errors at zero and
+        shrinking the Partial Match bucket that reviewers must process by hand.
       </p>
 
       <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -836,7 +841,7 @@ export function AccuracyInsights() {
             guardrailBreached ? 'border-red-300 bg-red-50' : 'border-gray-200 bg-white'
           }`}
         >
-          <div className="text-sm text-gray-500">Confident error rate (guardrail)</div>
+          <div className="text-sm text-gray-500">Match error rate (guardrail)</div>
           <div
             className={`mt-1 text-3xl font-semibold ${
               guardrailBreached ? 'text-red-600' : 'text-green-600'
@@ -846,18 +851,18 @@ export function AccuracyInsights() {
           </div>
           <div className="mt-1 text-xs text-gray-400">
             {insights.confident_rejected} of {insights.confident_approved + insights.confident_rejected}{' '}
-            decided confident trials were rejected by a human. Must stay at 0% to auto-publish safely.
+            decided Match trials were rejected by a human. Must stay at 0% to auto-publish safely.
           </div>
         </div>
 
         <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-          <div className="text-sm text-gray-500">Unsure approval rate</div>
+          <div className="text-sm text-gray-500">Partial Match approval rate</div>
           <div className="mt-1 text-3xl font-semibold text-amber-600">
             {pct(insights.unsure_approval_rate)}
           </div>
           <div className="mt-1 text-xs text-gray-400">
             {insights.unsure_approved} approved / {insights.unsure_rejected} rejected among
-            reviewer-decided unsure trials. {insights.unsure_pending} still pending.
+            reviewer-decided Partial Match trials. {insights.unsure_pending} still pending.
           </div>
         </div>
 
@@ -867,7 +872,7 @@ export function AccuracyInsights() {
             {insights.false_negative_count}
           </div>
           <div className="mt-1 text-xs text-gray-400">
-            AI rejected, but a human restored and approved them.
+            AI marked them Not Suitable, but a human restored and approved them.
           </div>
         </div>
       </div>
@@ -885,14 +890,14 @@ export function AccuracyInsights() {
 
       <div className="mt-6 grid gap-4 lg:grid-cols-3">
         <ExampleList
-          title="Confident, but rejected (errors)"
+          title="Match, but rejected (errors)"
           examples={insights.confident_false_positives}
-          emptyText="None — confident trials all held up."
+          emptyText="None — Match trials all held up."
         />
         <ExampleList
-          title="Resolved unsure trials"
+          title="Resolved Partial Match trials"
           examples={insights.unsure_resolved}
-          emptyText="No unsure trials decided yet."
+          emptyText="No Partial Match trials decided yet."
         />
         <ExampleList
           title="False negatives"

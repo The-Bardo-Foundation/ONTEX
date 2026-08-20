@@ -2,16 +2,13 @@ import { useEffect, useState } from 'react';
 import { getStatistics } from '../api';
 import type { StatisticsResponse } from '../types';
 import { AccuracyInsights } from '../components/AccuracyInsights';
+import { formatAiLabel } from '../utils/formatters';
+import { useDocumentTitle } from '../utils/useDocumentTitle';
 
-const LABEL_DISPLAY: Record<string, string> = {
-  confident: 'Confident',
-  unsure: 'Unsure',
-  reject: 'Reject',
-  none: 'No label',
-};
-
+// The statistics query buckets trials without an AI label under "none"; every other
+// bucket is an ai_relevance_label value and uses the shared admin wording.
 function formatLabel(label: string): string {
-  return LABEL_DISPLAY[label] ?? label;
+  return label === 'none' ? 'No label' : formatAiLabel(label);
 }
 
 function MetricCard({
@@ -32,13 +29,14 @@ function MetricCard({
 }
 
 export function StatisticsPage() {
+  useDocumentTitle('Statistics');
+
   const [stats, setStats] = useState<StatisticsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     getStatistics()
       .then((data) => {
         if (!cancelled) {
@@ -114,20 +112,20 @@ export function StatisticsPage() {
 
             <div className="mt-6 bg-white border border-gray-200 rounded-lg shadow-sm p-6">
               <div className="text-sm text-gray-500">
-                AI "confident" trials also approved by a human
+                AI "Match" trials also approved by a human
               </div>
               <div className="mt-1 flex items-baseline gap-3">
                 <span className="text-4xl font-semibold text-blue-600">
                   {confidentRateDisplay}
                 </span>
                 <span className="text-sm text-gray-500">
-                  of reviewer-decided AI-confident trials were approved
+                  of reviewer-decided AI Match trials were approved
                 </span>
               </div>
               <p className="mt-2 text-xs text-gray-400">
-                Goal: drive this toward 100% so confident AI classifications can be trusted
-                without human latency. Shows "—" until at least one confident trial has been
-                approved or rejected by a human.
+                Goal: drive this toward 100% so Match classifications can be trusted without
+                human latency. Shows "—" until at least one Match trial has been approved or
+                rejected by a human.
               </p>
             </div>
 

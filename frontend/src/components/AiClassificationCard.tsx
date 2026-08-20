@@ -1,12 +1,5 @@
 import type { TrialDetail } from '../types';
-
-// Display labels shown to users — the underlying enum values (confident / unsure / reject)
-// stay in the database and AI prompt so backend logic and existing rows keep working.
-const LABEL_DISPLAY: Record<string, string> = {
-  confident: 'Match',
-  unsure: 'Partial Match',
-  reject: 'Not Suitable',
-};
+import { formatAiLabel } from '../utils/formatters';
 
 const LABEL_STYLES: Record<string, string> = {
   confident: 'bg-green-100 text-green-800',
@@ -42,7 +35,7 @@ export function AiClassificationCard({ trial }: { trial: TrialDetail }) {
       {ai_relevance_label && labelStyle && (
         <div className="mb-3">
           <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${labelStyle}`}>
-            {LABEL_DISPLAY[ai_relevance_label] ?? ai_relevance_label}
+            {formatAiLabel(ai_relevance_label)}
           </span>
         </div>
       )}
