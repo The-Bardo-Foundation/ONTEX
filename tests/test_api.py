@@ -1217,6 +1217,80 @@ async def test_backtest_metrics_math(test_client, db_engine, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_backtest_skips_failed_classifications(test_client, db_engine, monkeypatch):
+    """A failed AI call must not be scored as an `unsure` verdict.
+
+    The client returns `unsure` with `failed=True` when the LLM call itself errors.
+    Counting it would blame the candidate prompt for an outage, so those trials are
+    dropped from both the candidate and the baseline sample.
+    """
+    from app.services.ai.schemas import ClassificationResult, ConfidenceLabel
+
+    class _FakeAIClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def classify_trial(self, system_prompt, user_prompt, **kwargs):
+            if "will_fail" in user_prompt:
+                return ClassificationResult(
+                    label=ConfidenceLabel.UNSURE, reason="AI evaluation failed", failed=True
+                )
+            return ClassificationResult(label=ConfidenceLabel.CONFIDENT, reason="test")
+
+    monkeypatch.setattr("app.api.endpoints.AIClient", _FakeAIClient)
+
+    async with db_engine.begin() as conn:
+        await conn.execute(ClinicalTrial.__table__.insert().values(
+            nct_id="NCT71000001", brief_title="scored keep", status=TrialStatus.APPROVED,
+            ai_relevance_label="confident",
+        ))
+        await conn.execute(ClinicalTrial.__table__.insert().values(
+            nct_id="NCT71000002", brief_title="will_fail keep", status=TrialStatus.APPROVED,
+            ai_relevance_label="confident",
+        ))
+
+    r = await test_client.post(
+        "/api/v1/trials/insights/backtest", json={"prompt": "candidate prompt"}
+    )
+    assert r.status_code == 200
+    body = r.json()
+    # Only the trial that got a real verdict is compared, on both sides.
+    assert body["sample_size"] == 1
+    assert body["candidate"]["unsure_rate"] == pytest.approx(0.0)
+    assert body["candidate"]["correct_auto_count"] == 1
+    assert body["baseline"]["unsure_rate"] == pytest.approx(0.0)
+
+
+@pytest.mark.asyncio
+async def test_backtest_all_classifications_failed_returns_503(
+    test_client, db_engine, monkeypatch
+):
+    from app.services.ai.schemas import ClassificationResult, ConfidenceLabel
+
+    class _FakeAIClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def classify_trial(self, system_prompt, user_prompt, **kwargs):
+            return ClassificationResult(
+                label=ConfidenceLabel.UNSURE, reason="AI evaluation failed", failed=True
+            )
+
+    monkeypatch.setattr("app.api.endpoints.AIClient", _FakeAIClient)
+
+    async with db_engine.begin() as conn:
+        await conn.execute(ClinicalTrial.__table__.insert().values(
+            nct_id="NCT71000003", brief_title="only trial", status=TrialStatus.APPROVED,
+            ai_relevance_label="confident",
+        ))
+
+    r = await test_client.post(
+        "/api/v1/trials/insights/backtest", json={"prompt": "candidate prompt"}
+    )
+    assert r.status_code == 503
+
+
+@pytest.mark.asyncio
 async def test_advice_persists_merged_prompt(test_client, db_engine, monkeypatch):
     from app.services.ai.schemas import AccuracyAdvice, PromptEdit
 

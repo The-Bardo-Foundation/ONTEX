@@ -30,7 +30,7 @@ from app.services.ai.prompts import (
     ACCURACY_ADVICE_SYSTEM_PROMPT,
     ACCURACY_ADVICE_USER_PROMPT_TEMPLATE,
 )
-from app.services.ai.schemas import AccuracyAdvice
+from app.services.ai.schemas import AccuracyAdvice, ClassificationResult
 from app.services.prompt_merge import apply_prompt_edits
 
 router = APIRouter()
@@ -982,18 +982,29 @@ async def backtest_prompt(
 
     semaphore = asyncio.Semaphore(BACKTEST_CONCURRENCY)
 
-    async def _classify(row) -> str:
+    async def _classify(row) -> ClassificationResult:
         async with semaphore:
-            result = await classify_trial(client, _classifier_input(row), candidate_prompt)
-            return result.label.value
+            return await classify_trial(client, _classifier_input(row), candidate_prompt)
 
-    candidate_labels = await asyncio.gather(*[_classify(row) for row, _ in decided])
+    candidate_results = await asyncio.gather(*[_classify(row) for row, _ in decided])
 
-    candidate_items = [
-        (label, keep) for label, (_, keep) in zip(candidate_labels, decided)
+    # A failed AI call comes back as `unsure` with `failed=True`. Counting those
+    # would blame the candidate prompt for an outage, so drop them from both
+    # sides and compare only the trials that actually got a verdict.
+    compared = [
+        (result, row, keep)
+        for result, (row, keep) in zip(candidate_results, decided)
+        if not result.failed
     ]
+    if not compared:
+        raise HTTPException(
+            status_code=503,
+            detail="AI analysis is unavailable: every classification call failed.",
+        )
+
+    candidate_items = [(result.label.value, keep) for result, _, keep in compared]
     baseline_items = [
-        (row.ai_relevance_label or "unsure", keep) for row, keep in decided
+        (row.ai_relevance_label or "unsure", keep) for _, row, keep in compared
     ]
 
     candidate = _backtest_metrics(candidate_items)
@@ -1004,7 +1015,7 @@ async def backtest_prompt(
         BacktestRun(
             ai_model=settings.AI_MODEL,
             prompt_version_id=active.id,
-            sample_size=len(decided),
+            sample_size=len(compared),
             confident_error_rate=candidate.confident_error_rate,
             unsure_rate=candidate.unsure_rate,
             false_negative_count=candidate.false_negative_count,
@@ -1018,7 +1029,7 @@ async def backtest_prompt(
     await db.commit()
 
     return BacktestResponse(
-        sample_size=len(decided),
+        sample_size=len(compared),
         candidate=candidate,
         baseline=baseline,
     )

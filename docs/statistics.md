@@ -108,8 +108,10 @@ optional note; activating an older row rolls back. `classify_trial` takes an opt
 human-decided trials (60 by default, max 200, 5 concurrent calls) with the draft prompt and
 compares candidate against baseline metrics: confident error rate, unsure rate, false-negative
 count and correct auto-decision count. Ground truth is approved `clinical_trials` plus
-human-rejected `irrelevant_trials`; AI-only rejections are excluded. Runs are logged to
-`backtest_runs`.
+human-rejected `irrelevant_trials`; AI-only rejections are excluded. Trials whose
+classification call fails (`ClassificationResult.failed`) are dropped from both sides so an
+outage is not scored as an `unsure` verdict against the candidate; `sample_size` reports how
+many were actually compared. Runs are logged to `backtest_runs`.
 
 ## Schema
 
