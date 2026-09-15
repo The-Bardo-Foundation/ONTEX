@@ -11,12 +11,37 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqladmin import Admin
 
+from sqlalchemy import inspect, text
+
 from alembic import command
 from app.admin.views import ClinicalTrialAdmin
 from app.api.endpoints import router as api_router
 from app.core.config import settings
 from app.db.database import Base, engine
 from app.services.ingestion import run_daily_ingestion
+
+
+def _sync_sqlite_columns(sync_conn) -> None:
+    """Add any model columns missing from existing SQLite tables.
+
+    ``create_all`` only creates new tables; it does not alter existing ones.
+    Local dev uses SQLite with ``create_all`` instead of Alembic, so we patch
+    in columns added by later migrations (e.g. proposed_prompt on
+    accuracy_advice_runs).
+    """
+    inspector = inspect(sync_conn)
+    for table_name, table in Base.metadata.tables.items():
+        if not inspector.has_table(table_name):
+            continue
+        existing = {col["name"] for col in inspector.get_columns(table_name)}
+        for col in table.columns:
+            if col.name in existing:
+                continue
+            col_type = col.type.compile(dialect=sync_conn.dialect)
+            sync_conn.execute(
+                text(f"ALTER TABLE {table_name} ADD COLUMN {col.name} {col_type}")
+            )
+            print(f"run_migrations: added missing column {table_name}.{col.name}")
 
 # Initialize Scheduler
 scheduler = AsyncIOScheduler()
@@ -51,6 +76,7 @@ async def run_migrations():
         try:
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
+                await conn.run_sync(_sync_sqlite_columns)
             print("run_migrations: sqlite tables ensured via metadata.create_all")
         except Exception as e:
             print("run_migrations: error creating sqlite tables:", e)
@@ -147,7 +173,9 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 # Setup Admin
-admin = Admin(app, engine)
+# SQLAdmin defaults to /admin, which conflicts with the React app's /admin/* routes
+# on hard refresh when the built SPA is served from this process.
+admin = Admin(app, engine, base_url="/sqladmin")
 admin.add_view(ClinicalTrialAdmin)
 
 # Include API Router

@@ -51,6 +51,30 @@ export function getOverallStatusDisplay(status: string | null | undefined): Stat
   };
 }
 
+/**
+ * Display names for the AI relevance labels. The enum values (confident /
+ * unsure / reject) stay in the database and the classifier prompt; only the
+ * wording admins read changes. Kept here so every admin surface — trial detail,
+ * review queue, statistics — uses the same three words.
+ */
+const AI_LABEL_DISPLAY: Record<string, string> = {
+  confident: 'Match',
+  unsure: 'Partial Match',
+  reject: 'Not Suitable',
+};
+
+/** Human-readable form of an `ai_relevance_label` value. */
+export function formatAiLabel(label: string | null | undefined): string {
+  if (!label) return '—';
+  return AI_LABEL_DISPLAY[label.toLowerCase()] ?? label;
+}
+
+/** Human-readable form of a reviewer decision ("approved" / "rejected"). */
+export function formatHumanDecision(decision: string | null | undefined): string {
+  if (!decision) return '—';
+  return decision.charAt(0).toUpperCase() + decision.slice(1);
+}
+
 export interface StatusGroup {
   /** Stable key for React lists and expand/collapse state. */
   key: string;
