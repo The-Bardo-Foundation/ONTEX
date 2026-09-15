@@ -93,15 +93,23 @@ Fetches the complete study record for each candidate and maps it to a flat dict 
 
 ### Step 3.5 — Preserve admin edits
 
-**File:** [app/services/ingestion.py](../app/services/ingestion.py)
+**File:** [app/services/ingestion_skip.py](../app/services/ingestion_skip.py) — `load_existing_trial_state()`
 
 For trials already in the database (updated or re-evaluated), loads any non-null `custom_*` fields that an admin has manually edited, plus a snapshot of the current row. The `custom_*` values are re-applied after Steps 4–5 so AI output never overwrites human curation. The snapshot feeds the Step 3.6 content-comparison.
+
+Returns an `ExistingTrialState` dataclass with three maps keyed by `nct_id`:
+
+| Map | Contents |
+|-----|----------|
+| `custom_map` | Non-null admin-edited `custom_*` values |
+| `snapshot_map` | Current `official_*` field values (for comparison) |
+| `approval_map` | `approved_at` / `approved_by` (for previously approved trials) |
 
 ---
 
 ### Step 3.6 — Skip unchanged content
 
-**Files:** [app/services/ingestion.py](../app/services/ingestion.py), [app/services/ingestion_skip.py](../app/services/ingestion_skip.py)
+**File:** [app/services/ingestion_skip.py](../app/services/ingestion_skip.py) — `skip_unchanged_trials()`, `is_content_unchanged()`, `build_sync_values()`
 
 The pipeline detects "an update" purely by a changed `last_update_post_date`. But ClinicalTrials.gov frequently bumps that date for administrative touches (contact-info edits, location adjustments) that change nothing about relevance or summary content. Re-running the AI on these is wasted cost.
 
@@ -114,6 +122,8 @@ When content is unchanged, the trial is **dropped from the AI pipeline** and ins
 - **No AI call, no status reset** — `classify_trial` and `ai_generate_summaries` are never invoked; an APPROVED trial stays APPROVED, an irrelevant trial stays irrelevant.
 
 Each skipped trial increments `IngestionRun.skipped_unchanged` (Step 7). Ignored fields are configured via `IGNORED_UPDATE_FIELDS` (see Configuration).
+
+Returns an `UnchangedSkipResult` dataclass with `clinical_skipped`, `rejected_skipped`, and `remaining_fetched` (trials that still need AI processing).
 
 ---
 
@@ -257,3 +267,57 @@ Schema: [app/db/models.py](../app/db/models.py)
 | `RESEND_API_KEY` | `""` | Resend API key. Empty disables the Step 8 summary email entirely. |
 | `INGESTION_SUMMARY_FROM` | `""` | Sender address for the summary email. Must be a domain verified in Resend. Empty skips the send. |
 | `CLERK_SECRET_KEY` | `""` | Clerk Backend API secret, used only to resolve Step 8 recipients. JWT verification uses JWKS and does not need this. |
+
+---
+
+## Module Structure
+
+The pipeline is split across two service modules. `run_daily_ingestion()` in
+`ingestion.py` is a thin orchestrator (~50 lines of call chain) that delegates
+each step to a dedicated helper. The `# ─── STEP N ───` banner comments live in
+that orchestrator, so the whole pipeline still reads top-to-bottom in one place.
+
+### `app/services/ingestion.py` — orchestration
+
+| Function / type | Step | Responsibility |
+|-----------------|------|----------------|
+| `run_daily_ingestion()` | — | Entry point; wires all steps together |
+| `_collect_candidates()` | 1 | Search ClinicalTrials.gov for NCT IDs + dates |
+| `_classify_candidates()` → `CandidateBuckets` | 2 | Bucket candidates as new / updated / re-eval |
+| `_fetch_trial_details()` | 3 | Fetch and map full study records |
+| `_record_empty_run()` | —, 8 | Early exit when nothing to process; still sends the summary email |
+| `_classify_fetched_trials()` | 4 | AI relevance classification; also reports which NCTs the AI call failed on |
+| `_split_by_relevance()` | — | Split confident/unsure vs reject; drop trials whose classification failed |
+| `_summarize_trials()` | 5 | AI summarisation for relevant trials |
+| `_upsert_trials()` | 6 | Merge into `clinical_trials` or `irrelevant_trials` |
+| `_record_ingestion_run()` | 7, 8 | Write `IngestionRun` audit row, log summary, send the summary email |
+
+Both terminal paths (`_record_empty_run` and `_record_ingestion_run`) build a
+summary dict with the **same key set** and hand it to `send_ingestion_summary()`,
+so Step 8 produces an identical email table either way.
+
+### `app/services/ingestion_skip.py` — admin-edit preservation & skip logic
+
+| Function / type | Step | Responsibility |
+|-----------------|------|----------------|
+| `load_existing_trial_state()` → `ExistingTrialState` | 3.5 | Load admin-edited fields, snapshots, approval history |
+| `is_content_unchanged()` | 3.6 | Pure comparison: are only ignored fields different? |
+| `build_sync_values()` | 3.6 | Build column→value dict for silent sync |
+| `skip_unchanged_trials()` → `UnchangedSkipResult` | 3.6 | Skip AI for unchanged trials; sync DB in place |
+
+Constants `CUSTOM_FIELDS` and `SNAPSHOT_FIELDS` live here because they define
+which columns Steps 3.5 and 3.6 operate on.
+
+### Design notes
+
+- **Session factory injection** — `load_existing_trial_state()` and
+  `skip_unchanged_trials()` accept a `session_factory` parameter (typically
+  `SessionLocal`) rather than importing it directly. This keeps the skip module
+  decoupled from the orchestrator and allows tests to monkeypatch
+  `app.services.ingestion.SessionLocal`.
+- **Pure vs I/O helpers** — `is_content_unchanged()` and `build_sync_values()`
+  are pure functions with no DB access, making them easy to unit-test in
+  isolation (`tests/test_ingestion_skip.py`).
+- **Dataclasses for step output** — `CandidateBuckets` (Step 2),
+  `ExistingTrialState` (Step 3.5), and `UnchangedSkipResult` (Step 3.6) carry
+  structured state between steps instead of loose tuples/dicts.

@@ -1388,3 +1388,96 @@ async def test_approved_trial_update_saves_previous_official_snapshot(tmp_path, 
         assert trial.brief_summary == "Updated summary from ClinicalTrials.gov"
 
     await engine.dispose()
+
+
+# ─── Step 8 — the pipeline hands its summary to the email sender ──────────────
+#
+# The refactor moved the two `send_ingestion_summary()` call sites out of
+# `run_daily_ingestion` and into `_record_ingestion_run` / `_record_empty_run`.
+# tests/test_notifications.py covers the sender itself but calls it directly, so
+# these two tests are what actually pin the pipeline to it — one per terminal
+# path, since the empty path builds its summary dict separately.
+
+@pytest.mark.asyncio
+async def test_completed_run_sends_summary_email(tmp_path, monkeypatch):
+    """A run that processed trials should hand its final summary to Step 8."""
+    engine, factory = _make_test_db(tmp_path)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    trial_dict = make_trial_dict()
+    sent = AsyncMock()
+
+    monkeypatch.setattr("app.services.ingestion.SessionLocal", factory)
+    monkeypatch.setattr(
+        "app.services.ingestion.iter_study_index_rows",
+        lambda **kwargs: [("NCT11111111", "2024-06-01")],
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.fetch_full_study",
+        lambda nct_id: {"protocolSection": {}},
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.map_api_to_model",
+        lambda raw: trial_dict.copy(),
+    )
+    monkeypatch.setattr("app.services.ingestion.AIClient", lambda: _make_mock_ai_client())
+    monkeypatch.setattr(
+        "app.services.ingestion.ai_generate_summaries",
+        AsyncMock(return_value=FAKE_AI_SUMMARIES),
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.classify_trial",
+        AsyncMock(return_value=make_classification()),
+    )
+    monkeypatch.setattr("app.services.ingestion.send_ingestion_summary", sent)
+
+    from app.services.ingestion import run_daily_ingestion
+    await run_daily_ingestion(search_terms=["osteosarcoma"])
+
+    sent.assert_awaited_once()
+    summary = sent.await_args.args[0]
+    assert summary["label"] == "Done"
+    assert summary["search_terms"] == ["osteosarcoma"]
+    assert summary["candidates_found"] == 1
+    assert summary["new"] == 1
+    assert summary["relevant"] == 1
+    assert summary["auto_approved"] == 1
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_empty_run_sends_summary_email_with_candidate_counts(tmp_path, monkeypatch):
+    """When every fetch fails, Step 8 still fires — and reports the candidates
+    Step 2 identified rather than zeros, so a total fetch outage is visible."""
+    engine, factory = _make_test_db(tmp_path)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    sent = AsyncMock()
+
+    monkeypatch.setattr("app.services.ingestion.SessionLocal", factory)
+    monkeypatch.setattr(
+        "app.services.ingestion.iter_study_index_rows",
+        lambda **kwargs: [("NCT11111111", "2024-06-01")],
+    )
+    # Every fetch fails → `fetched` is empty → the early-exit path.
+    monkeypatch.setattr(
+        "app.services.ingestion.fetch_full_study",
+        lambda nct_id: None,
+    )
+    monkeypatch.setattr("app.services.ingestion.send_ingestion_summary", sent)
+
+    from app.services.ingestion import run_daily_ingestion
+    await run_daily_ingestion(search_terms=["osteosarcoma"])
+
+    sent.assert_awaited_once()
+    summary = sent.await_args.args[0]
+    assert summary["label"] == "Done — no trials to process"
+    assert summary["candidates_found"] == 1
+    assert summary["new"] == 1
+    assert summary["fetch_errors"] == 1
+    assert summary["relevant"] == 0
+
+    await engine.dispose()

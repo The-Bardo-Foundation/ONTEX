@@ -16,7 +16,7 @@ Phases 1–3 complete; Phase 4 in progress. The ingestion pipeline is fully oper
 - OpenAI async client wrapper with retry logic and fail-safe behaviour
 - Relevance classifier (`classifier.py`) — fully wired, Pydantic v2; AI returns discrete label (`confident`/`unsure`/`reject`) instead of a numeric confidence score
 - AI summariser (`summarizer.py`) — generates patient-friendly `custom_*` fields; fail-safe on LLM error
-- **Full ingestion pipeline** (`ingestion.py`) — Steps 1–7 implemented end-to-end, with `ingestion_event` (NEW/UPDATED) and `previous_official_snapshot` support
+- **Full ingestion pipeline** — Steps 1–7 implemented end-to-end, with `ingestion_event` (NEW/UPDATED) and `previous_official_snapshot` support. `run_daily_ingestion()` in `ingestion.py` is a thin orchestrator that delegates each step to a helper; Steps 3.5/3.6 (admin-edit preservation and the unchanged-content skip) live in `ingestion_skip.py`. Module map in [`docs/ingestion.md`](docs/ingestion.md#module-structure).
 - Migration `004_phase3_review_queue` — adds `ingestion_event`, `reviewer_notes`, `rejected_at/by`, `previous_official_snapshot`
 - FastAPI backend with full review queue API:
   - `GET /api/v1/trials/review-queue` — pending trials with ingestion_event (auth-protected)
